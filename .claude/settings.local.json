@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(grep -E \"\\\\.\\(ts|js|json|config|css\\)$\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Jhnic\\leaseiq\\app\\(dashboard)\\leases\\[id]",
+      "c:\\Users\\Jhnic\\leaseiq\\app\\api\\leases\\[id]"
+    ]
+  }
+}

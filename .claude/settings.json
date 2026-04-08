@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm list:*)",
+      "Bash(npx tsc:*)",
+      "Bash(node -e \"const s=require\\('stripe'\\); console.log\\(Object.keys\\(s.LATEST_API_VERSION||{}\\)\\)\")",
+      "Bash(node -e \"const {Stripe}=require\\('stripe'\\); const s=new Stripe\\('x'\\); console.log\\(Stripe.LATEST_API_VERSION\\)\")",
+      "Bash(node -e \"const s=require\\('stripe'\\); console.log\\(s.default?.LATEST_API_VERSION ?? s.LATEST_API_VERSION\\)\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\Jhnic\\leaseiq\\app\\(dashboard)\\leases\\[id]"
+    ]
+  }
+}
