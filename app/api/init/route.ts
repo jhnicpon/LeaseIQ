@@ -19,10 +19,39 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const sql = getDb();
+  // Surface env var issues immediately — these would otherwise cause a bare 500
+  if (!process.env.DATABASE_URL) {
+    return NextResponse.json(
+      { error: 'DATABASE_URL environment variable is not set. Add it in Vercel → Settings → Environment Variables.' },
+      { status: 500 }
+    );
+  }
+
+  let sql: ReturnType<typeof getDb>;
+  try {
+    sql = getDb();
+  } catch (err: any) {
+    return NextResponse.json({ error: `Failed to create DB client: ${err.message}` }, { status: 500 });
+  }
+
+  // Quick connectivity test before running DDL
+  let step = 'connectivity test';
+  try {
+    await sql`SELECT 1`;
+  } catch (err: any) {
+    return NextResponse.json(
+      {
+        error: `Database connection failed at step "${step}": ${err.message}`,
+        hint: 'Check that DATABASE_URL is a valid Neon connection string and the database is accessible.',
+        databaseUrl: process.env.DATABASE_URL.replace(/:([^:@]+)@/, ':***@'), // redact password
+      },
+      { status: 500 }
+    );
+  }
 
   try {
     // ── users ─────────────────────────────────────────────────────────────────
+    step = 'create users table';
     await sql`
       CREATE TABLE IF NOT EXISTS users (
         id TEXT PRIMARY KEY,
@@ -41,6 +70,7 @@ export async function GET(req: NextRequest) {
     `;
 
     // ── leases ────────────────────────────────────────────────────────────────
+    step = 'create leases table';
     await sql`
       CREATE TABLE IF NOT EXISTS leases (
         id TEXT PRIMARY KEY,
@@ -62,9 +92,11 @@ export async function GET(req: NextRequest) {
       )
     `;
 
+    step = 'create leases index';
     await sql`CREATE INDEX IF NOT EXISTS idx_leases_userId ON leases("userId")`;
 
     // ── alerts ────────────────────────────────────────────────────────────────
+    step = 'create alerts table';
     await sql`
       CREATE TABLE IF NOT EXISTS alerts (
         id TEXT PRIMARY KEY,
@@ -78,10 +110,12 @@ export async function GET(req: NextRequest) {
       )
     `;
 
+    step = 'create alerts indexes';
     await sql`CREATE INDEX IF NOT EXISTS idx_alerts_userId ON alerts("userId")`;
     await sql`CREATE INDEX IF NOT EXISTS idx_alerts_leaseId ON alerts("leaseId")`;
 
     // ── lease_versions ────────────────────────────────────────────────────────
+    step = 'create lease_versions table';
     await sql`
       CREATE TABLE IF NOT EXISTS lease_versions (
         id TEXT PRIMARY KEY,
@@ -95,9 +129,11 @@ export async function GET(req: NextRequest) {
       )
     `;
 
+    step = 'create lease_versions index';
     await sql`CREATE INDEX IF NOT EXISTS idx_lease_versions_leaseId ON lease_versions("leaseId")`;
 
     // ── team_members ──────────────────────────────────────────────────────────
+    step = 'create team_members table';
     await sql`
       CREATE TABLE IF NOT EXISTS team_members (
         id TEXT PRIMARY KEY,
@@ -111,9 +147,11 @@ export async function GET(req: NextRequest) {
       )
     `;
 
+    step = 'create team_members index';
     await sql`CREATE INDEX IF NOT EXISTS idx_team_members_accountId ON team_members("accountId")`;
 
     // ── promo_codes ───────────────────────────────────────────────────────────
+    step = 'create promo_codes table';
     await sql`
       CREATE TABLE IF NOT EXISTS promo_codes (
         id TEXT PRIMARY KEY,
@@ -126,6 +164,7 @@ export async function GET(req: NextRequest) {
     `;
 
     // ── promo_code_uses ───────────────────────────────────────────────────────
+    step = 'create promo_code_uses table';
     await sql`
       CREATE TABLE IF NOT EXISTS promo_code_uses (
         id TEXT PRIMARY KEY,
@@ -135,10 +174,12 @@ export async function GET(req: NextRequest) {
       )
     `;
 
+    step = 'create promo_code_uses indexes';
     await sql`CREATE INDEX IF NOT EXISTS idx_promo_uses_user ON promo_code_uses(user_id)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_promo_uses_code ON promo_code_uses(promo_code_id)`;
 
     // Seed the Mustanges2028 promo code if not already present
+    step = 'seed promo code';
     await sql`
       INSERT INTO promo_codes (id, code, discount_type, plan, is_active)
       VALUES (gen_random_uuid()::text, 'mustanges2028', 'free_month', 'professional', 1)
@@ -150,7 +191,14 @@ export async function GET(req: NextRequest) {
       message: 'All tables created successfully.',
     });
   } catch (err: any) {
-    console.error('Init error:', err);
-    return NextResponse.json({ error: err.message ?? 'Init failed' }, { status: 500 });
+    console.error(`Init failed at step "${step}":`, err);
+    return NextResponse.json(
+      {
+        error: `Init failed at step "${step}": ${err.message}`,
+        detail: err.detail ?? null,
+        code: err.code ?? null,
+      },
+      { status: 500 }
+    );
   }
 }
