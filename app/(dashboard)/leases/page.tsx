@@ -2,7 +2,7 @@
 import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Search, Download, Plus, ChevronUp, ChevronDown, Loader2, FileText, GitCompare, Upload, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Search, Download, Plus, ChevronUp, ChevronDown, Loader2, FileText, GitCompare, Upload, AlertTriangle, RefreshCw, TrendingDown, TrendingUp, Minus } from 'lucide-react';
 import { formatDate, formatCurrency, getDaysUntil } from '@/lib/dateUtils';
 import { getRiskBadgeClasses } from '@/lib/riskScore';
 
@@ -62,6 +62,19 @@ export default function LeasesPage() {
 
   const compareSelected = () => {
     router.push(`/compare?ids=${[...selected].join(',')}`);
+  };
+
+  const getMarketBadge = (position: string | null | undefined) => {
+    switch (position) {
+      case 'below_market':
+        return { label: 'Below Market', color: 'text-green-400 bg-green-900/20 border-green-800', Icon: TrendingDown };
+      case 'at_market':
+        return { label: 'At Market', color: 'text-yellow-400 bg-yellow-900/20 border-yellow-800', Icon: Minus };
+      case 'above_market':
+        return { label: 'Above Market', color: 'text-red-400 bg-red-900/20 border-red-800', Icon: TrendingUp };
+      default:
+        return null;
+    }
   };
 
   const getRiskLabel = (lease: any) => {
@@ -158,16 +171,17 @@ export default function LeasesPage() {
                   </th>
                 ))}
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Days Left</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Market</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Risk</th>
                 <th className="text-left px-4 py-3 text-xs font-medium text-gray-400 uppercase tracking-wider">Status</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-800">
               {loading ? (
-                <tr><td colSpan={8} className="py-12 text-center"><Loader2 className="h-6 w-6 animate-spin text-blue-400 mx-auto" /></td></tr>
+                <tr><td colSpan={9} className="py-12 text-center"><Loader2 className="h-6 w-6 animate-spin text-blue-400 mx-auto" /></td></tr>
               ) : fetchError ? (
                 <tr>
-                  <td colSpan={8} className="py-12 text-center">
+                  <td colSpan={9} className="py-12 text-center">
                     <AlertTriangle className="h-10 w-10 text-red-400 mx-auto mb-3" />
                     <p className="text-gray-400 mb-3">{fetchError}</p>
                     <button onClick={() => fetchLeases()} className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium mx-auto">
@@ -177,7 +191,7 @@ export default function LeasesPage() {
                 </tr>
               ) : !leases.length ? (
                 <tr>
-                  <td colSpan={8} className="py-16 text-center">
+                  <td colSpan={9} className="py-16 text-center">
                     <FileText className="h-12 w-12 text-gray-700 mx-auto mb-3" />
                     <p className="text-gray-500">No leases found</p>
                     <Link href="/leases/upload" className="text-blue-400 hover:text-blue-300 text-sm mt-1 inline-block">Upload your first lease</Link>
@@ -187,6 +201,7 @@ export default function LeasesPage() {
                 const { label, color } = getStatusConfig(lease);
                 const days = getDaysUntil(lease.expirationDate);
                 const risk = getRiskLabel(lease);
+                const market = getMarketBadge(lease.marketPosition);
                 const isSelected = selected.has(lease.id);
                 return (
                   <tr
@@ -210,6 +225,14 @@ export default function LeasesPage() {
                     <td className="px-4 py-3 text-sm text-gray-300">{lease.monthlyRent ? formatCurrency(lease.monthlyRent) : '—'}</td>
                     <td className="px-4 py-3 text-sm text-gray-300">
                       {lease.expirationDate ? (days < 0 ? 'Expired' : `${days}d`) : '—'}
+                    </td>
+                    <td className="px-4 py-3">
+                      {market ? (
+                        <span className={`text-xs px-2 py-0.5 rounded-full border font-medium flex items-center gap-1 w-fit ${market.color}`}>
+                          <market.Icon className="h-3 w-3" />
+                          {market.label}
+                        </span>
+                      ) : <span className="text-gray-600 text-xs">—</span>}
                     </td>
                     <td className="px-4 py-3">
                       {risk ? (

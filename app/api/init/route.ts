@@ -183,6 +183,25 @@ export async function GET(req: NextRequest) {
     await sql`CREATE INDEX IF NOT EXISTS idx_promo_uses_user ON promo_code_uses(user_id)`;
     await sql`CREATE INDEX IF NOT EXISTS idx_promo_uses_code ON promo_code_uses(promo_code_id)`;
 
+    // ── market_analyses ───────────────────────────────────────────────────────
+    step = 'create market_analyses table';
+    await sql`
+      CREATE TABLE IF NOT EXISTS market_analyses (
+        id TEXT PRIMARY KEY,
+        "leaseId" TEXT NOT NULL REFERENCES leases(id) ON DELETE CASCADE,
+        "userId" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        "analysisData" TEXT NOT NULL,
+        "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        "expiresAt" TIMESTAMPTZ NOT NULL
+      )
+    `;
+
+    step = 'create market_analyses index';
+    await sql`CREATE INDEX IF NOT EXISTS idx_market_analyses_leaseId ON market_analyses("leaseId")`;
+
+    step = 'migrate marketPosition column';
+    await sql`ALTER TABLE leases ADD COLUMN IF NOT EXISTS "marketPosition" TEXT`;
+
     // Seed the Mustanges2028 promo code if not already present
     step = 'seed promo code';
     await sql`

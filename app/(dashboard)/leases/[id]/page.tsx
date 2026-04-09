@@ -1,11 +1,12 @@
 'use client';
 import { use, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Edit2, Check, X, RefreshCw, Download, AlertTriangle, Loader2, FileDown, Mail, History, Brain } from 'lucide-react';
+import { ArrowLeft, Edit2, Check, X, RefreshCw, Download, AlertTriangle, Loader2, FileDown, Mail, History, Brain, TrendingUp, TrendingDown, Minus, ExternalLink } from 'lucide-react';
 import Link from 'next/link';
 import { formatDate, formatCurrency } from '@/lib/dateUtils';
 import { getRiskBadgeClasses } from '@/lib/riskScore';
 import RenewalLetterModal from '@/components/ui/RenewalLetterModal';
+import type { MarketAnalysis, MarketPosition } from '@/lib/marketAnalysis';
 
 export default function LeaseDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
@@ -19,6 +20,10 @@ export default function LeaseDetailPage({ params }: { params: Promise<{ id: stri
   const [saveError, setSaveError] = useState('');
   const [reprocessing, setReprocessing] = useState(false);
   const [showRenewalModal, setShowRenewalModal] = useState(false);
+  const [marketAnalysis, setMarketAnalysis] = useState<MarketAnalysis | null>(null);
+  const [marketCachedAt, setMarketCachedAt] = useState<string | null>(null);
+  const [marketLoading, setMarketLoading] = useState(false);
+  const [marketError, setMarketError] = useState('');
 
   const fetchLease = async () => {
     try {
@@ -35,6 +40,41 @@ export default function LeaseDetailPage({ params }: { params: Promise<{ id: stri
   };
 
   useEffect(() => { fetchLease(); }, [id]);
+
+  const fetchMarketAnalysis = async () => {
+    try {
+      const res = await fetch(`/api/leases/${id}/market-analysis`);
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.analysis) {
+        setMarketAnalysis(data.analysis);
+        setMarketCachedAt(data.cachedAt);
+      }
+    } catch {
+      // cached analysis is optional — don't surface error on initial load
+    }
+  };
+
+  useEffect(() => { fetchMarketAnalysis(); }, [id]);
+
+  const runMarketAnalysis = async () => {
+    setMarketLoading(true);
+    setMarketError('');
+    try {
+      const res = await fetch(`/api/leases/${id}/market-analysis`, { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Analysis failed');
+      }
+      const data = await res.json();
+      setMarketAnalysis(data.analysis);
+      setMarketCachedAt(data.cachedAt);
+    } catch (e: any) {
+      setMarketError(e.message || 'Market analysis failed. Please try again.');
+    } finally {
+      setMarketLoading(false);
+    }
+  };
 
   const data = lease?.extractedData ? JSON.parse(lease.extractedData) : {};
 
@@ -354,8 +394,270 @@ export default function LeaseDetailPage({ params }: { params: Promise<{ id: stri
         );
       })()}
 
+      {/* Market Rent Analysis */}
+      <MarketRentSection
+        analysis={marketAnalysis}
+        cachedAt={marketCachedAt}
+        loading={marketLoading}
+        error={marketError}
+        onAnalyze={runMarketAnalysis}
+        onRefresh={runMarketAnalysis}
+      />
+
       {showRenewalModal && (
         <RenewalLetterModal leaseData={data} onClose={() => setShowRenewalModal(false)} />
+      )}
+    </div>
+  );
+}
+
+// ─── Market Rent Analysis Section ────────────────────────────────────────────
+
+function positionConfig(position: MarketPosition) {
+  switch (position) {
+    case 'below_market':
+      return {
+        label: 'Below Market',
+        color: 'text-green-400',
+        bg: 'bg-green-900/20',
+        border: 'border-green-800',
+        icon: TrendingDown,
+        meterPos: 15,
+      };
+    case 'at_market':
+      return {
+        label: 'At Market',
+        color: 'text-yellow-400',
+        bg: 'bg-yellow-900/20',
+        border: 'border-yellow-800',
+        icon: Minus,
+        meterPos: 50,
+      };
+    case 'above_market':
+      return {
+        label: 'Above Market',
+        color: 'text-red-400',
+        bg: 'bg-red-900/20',
+        border: 'border-red-800',
+        icon: TrendingUp,
+        meterPos: 85,
+      };
+    default:
+      return {
+        label: 'Unknown',
+        color: 'text-gray-400',
+        bg: 'bg-gray-800/30',
+        border: 'border-gray-700',
+        icon: Minus,
+        meterPos: 50,
+      };
+  }
+}
+
+function leverageColor(leverage: string) {
+  if (leverage === 'strong') return 'text-green-400';
+  if (leverage === 'weak') return 'text-red-400';
+  return 'text-yellow-400';
+}
+
+function MarketRentSection({
+  analysis,
+  cachedAt,
+  loading,
+  error,
+  onAnalyze,
+  onRefresh,
+}: {
+  analysis: MarketAnalysis | null;
+  cachedAt: string | null;
+  loading: boolean;
+  error: string;
+  onAnalyze: () => void;
+  onRefresh: () => void;
+}) {
+  const config = analysis ? positionConfig(analysis.position) : null;
+  const Icon = config?.icon ?? Minus;
+
+  return (
+    <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+      <div className="flex items-center justify-between mb-4 pb-3 border-b border-gray-800">
+        <h2 className="text-base font-semibold text-white flex items-center gap-2">
+          <TrendingUp className="h-4 w-4 text-blue-400" />
+          Market Rent Analysis
+        </h2>
+        {analysis && (
+          <button
+            onClick={onRefresh}
+            disabled={loading}
+            className="flex items-center gap-1.5 text-xs text-gray-400 hover:text-gray-200 border border-gray-700 bg-gray-800 hover:bg-gray-700 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${loading ? 'animate-spin' : ''}`} />
+            Refresh Market Data
+          </button>
+        )}
+      </div>
+
+      {error && (
+        <div className="bg-red-900/20 border border-red-800 rounded-lg p-3 mb-4 flex items-center gap-2 text-sm text-red-300">
+          <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+          {error}
+        </div>
+      )}
+
+      {!analysis && !loading && (
+        <div className="text-center py-8">
+          <TrendingUp className="h-10 w-10 text-gray-700 mx-auto mb-3" />
+          <p className="text-gray-400 text-sm mb-4">
+            Find out how your rent compares to current market rates in this area.
+          </p>
+          <button
+            onClick={onAnalyze}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-lg text-sm font-medium mx-auto transition-colors"
+          >
+            <TrendingUp className="h-4 w-4" />
+            Analyze Market Rent
+          </button>
+        </div>
+      )}
+
+      {loading && !analysis && (
+        <div className="text-center py-10">
+          <Loader2 className="h-8 w-8 animate-spin text-blue-400 mx-auto mb-3" />
+          <p className="text-gray-400 text-sm">
+            Searching for comparable listings and market data...
+          </p>
+          <p className="text-gray-500 text-xs mt-1">This may take 30–60 seconds</p>
+        </div>
+      )}
+
+      {analysis && config && (
+        <div>
+          {/* Position badge + confidence */}
+          <div className="flex items-center gap-3 mb-5">
+            <div className={`flex items-center gap-2 px-4 py-2 rounded-lg border ${config.bg} ${config.border}`}>
+              <Icon className={`h-4 w-4 ${config.color}`} />
+              <span className={`font-bold text-sm ${config.color}`}>{config.label}</span>
+              {analysis.positionPercentage !== 0 && (
+                <span className={`text-xs ${config.color}`}>
+                  {analysis.positionPercentage > 0 ? '+' : ''}
+                  {analysis.positionPercentage.toFixed(1)}%
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-gray-700 bg-gray-800/30">
+              <span className="text-xs text-gray-400">Confidence</span>
+              <span className={`text-xs font-semibold ${
+                analysis.confidenceLevel === 'high'
+                  ? 'text-green-400'
+                  : analysis.confidenceLevel === 'medium'
+                  ? 'text-yellow-400'
+                  : 'text-red-400'
+              }`}>
+                {analysis.confidenceLevel.charAt(0).toUpperCase() + analysis.confidenceLevel.slice(1)}
+              </span>
+            </div>
+          </div>
+
+          {/* Visual meter */}
+          {analysis.position !== 'unknown' && (
+            <div className="mb-5">
+              <div className="flex justify-between text-xs text-gray-500 mb-1">
+                <span>Below Market</span>
+                <span>At Market</span>
+                <span>Above Market</span>
+              </div>
+              <div className="relative h-3 rounded-full bg-gradient-to-r from-green-800 via-yellow-700 to-red-800">
+                <div
+                  className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full border-2 border-white shadow-lg"
+                  style={{
+                    left: `${Math.min(Math.max(config.meterPos, 5), 95)}%`,
+                    transform: 'translate(-50%, -50%)',
+                    backgroundColor: config.color.replace('text-', '').includes('green')
+                      ? '#4ade80'
+                      : config.color.includes('yellow')
+                      ? '#facc15'
+                      : '#f87171',
+                  }}
+                />
+              </div>
+              {/* Rent range labels */}
+              {analysis.marketRentLow > 0 && (
+                <div className="flex justify-between text-xs text-gray-400 mt-2">
+                  <span>${analysis.marketRentLow.toFixed(0)}/sqft/yr</span>
+                  <span className="text-gray-500">Market range</span>
+                  <span>${analysis.marketRentHigh.toFixed(0)}/sqft/yr</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Current vs market */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-5">
+            <div className="p-4 rounded-lg border border-gray-800 bg-gray-800/30">
+              <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Current Rent</p>
+              <p className="text-white font-semibold">
+                {formatCurrency(analysis.currentRentMonthly)}/mo
+              </p>
+              {analysis.currentRentPerSqft && (
+                <p className="text-gray-400 text-xs">${analysis.currentRentPerSqft.toFixed(2)}/sqft/yr</p>
+              )}
+            </div>
+            <div className="p-4 rounded-lg border border-gray-800 bg-gray-800/30">
+              <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Market Range</p>
+              <p className="text-white font-semibold">
+                {analysis.marketRentLow > 0
+                  ? `$${analysis.marketRentLow.toFixed(0)}–$${analysis.marketRentHigh.toFixed(0)}/sqft/yr`
+                  : 'Insufficient data'}
+              </p>
+              {analysis.marketRentMid > 0 && (
+                <p className="text-gray-400 text-xs">Mid: ${analysis.marketRentMid.toFixed(0)}/sqft/yr</p>
+              )}
+            </div>
+            <div className="p-4 rounded-lg border border-gray-800 bg-gray-800/30">
+              <p className="text-xs text-gray-400 uppercase tracking-wider mb-1">Renewal Leverage</p>
+              <p className={`font-semibold capitalize ${leverageColor(analysis.renewalLeverage)}`}>
+                {analysis.renewalLeverage}
+              </p>
+            </div>
+          </div>
+
+          {/* Recommended action */}
+          {analysis.recommendedAction && (
+            <div className="bg-blue-900/10 border border-blue-800 rounded-lg p-4 mb-4">
+              <p className="text-xs text-blue-400 font-medium uppercase tracking-wider mb-1">Recommended Action</p>
+              <p className="text-sm text-blue-100">{analysis.recommendedAction}</p>
+            </div>
+          )}
+
+          {/* Summary */}
+          {analysis.summary && (
+            <p className="text-sm text-gray-300 mb-4 leading-relaxed">{analysis.summary}</p>
+          )}
+
+          {/* Sources */}
+          {analysis.sources.length > 0 && (
+            <div>
+              <p className="text-xs text-gray-500 mb-1">Sources</p>
+              <div className="flex flex-wrap gap-2">
+                {analysis.sources.map((src, i) => (
+                  <span
+                    key={i}
+                    className="text-xs text-gray-400 bg-gray-800 border border-gray-700 px-2 py-1 rounded flex items-center gap-1"
+                  >
+                    {src.startsWith('http') && <ExternalLink className="h-3 w-3" />}
+                    {src.startsWith('http') ? new URL(src).hostname : src}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {cachedAt && (
+            <p className="text-xs text-gray-600 mt-3">
+              Analyzed {new Date(cachedAt).toLocaleDateString()} · Cached for 30 days
+            </p>
+          )}
+        </div>
       )}
     </div>
   );
