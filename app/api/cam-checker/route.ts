@@ -42,11 +42,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'leaseId and camStatement are required' }, { status: 400 });
   }
 
-  const db = getDb();
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(session.user.email) as { id: string } | undefined;
+  const sql = getDb();
+  const userRows = await sql`SELECT id FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as { id: string } | undefined;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  const lease = db.prepare('SELECT * FROM leases WHERE id = ? AND userId = ?').get(leaseId, user.id) as any;
+  const leaseRows = await sql`SELECT * FROM leases WHERE id = ${leaseId} AND "userId" = ${user.id}`;
+  const lease = leaseRows[0] as any;
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
 
   const leaseData = lease.extractedData ? JSON.parse(lease.extractedData) : {};

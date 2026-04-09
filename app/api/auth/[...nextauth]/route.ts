@@ -14,8 +14,9 @@ const handler = NextAuth({
       async authorize(credentials) {
         if (!credentials?.email || !credentials?.password) return null;
 
-        const db = getDb();
-        const user = db.prepare('SELECT * FROM users WHERE email = ?').get(credentials.email) as any;
+        const sql = getDb();
+        const rows = await sql`SELECT * FROM users WHERE email = ${credentials.email}`;
+        const user = rows[0] as any;
 
         if (!user) return null;
 

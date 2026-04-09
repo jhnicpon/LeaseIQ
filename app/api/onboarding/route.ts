@@ -6,12 +6,9 @@ export async function GET() {
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const db = getDb();
-  const user = db.prepare('SELECT onboardingStep FROM users WHERE email = ?').get(session.user.email) as
-    | { onboardingStep: number }
-    | undefined;
-
-  return NextResponse.json({ step: user?.onboardingStep ?? 0 });
+  const sql = getDb();
+  const rows = await sql`SELECT "onboardingStep" FROM users WHERE email = ${session.user.email}`;
+  return NextResponse.json({ step: (rows[0] as any)?.onboardingStep ?? 0 });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -23,8 +20,8 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid step' }, { status: 400 });
   }
 
-  const db = getDb();
-  db.prepare('UPDATE users SET onboardingStep = ? WHERE email = ?').run(step, session.user.email);
+  const sql = getDb();
+  await sql`UPDATE users SET "onboardingStep" = ${step} WHERE email = ${session.user.email}`;
 
   return NextResponse.json({ step });
 }

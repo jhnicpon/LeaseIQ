@@ -16,19 +16,18 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  // Only run on Mondays (day 1) unless forced
   const force = req.nextUrl.searchParams.get('force') === 'true';
   const dayOfWeek = new Date().getDay();
   if (!force && dayOfWeek !== 1) {
     return NextResponse.json({ ok: true, skipped: 'Not Monday' });
   }
 
-  const db = getDb();
+  const sql = getDb();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
   type UserRow = { id: string; email: string; name: string };
-  const users = db.prepare('SELECT id, email, name FROM users').all() as UserRow[];
+  const users = await sql`SELECT id, email, name FROM users` as UserRow[];
 
   let sent = 0;
   for (const user of users) {
@@ -39,9 +38,10 @@ export async function GET(req: NextRequest) {
       monthlyRent: number | null;
     };
 
-    const userLeases = db.prepare(
-      "SELECT id, propertyAddress, expirationDate, monthlyRent FROM leases WHERE userId = ? AND status = 'completed'"
-    ).all(user.id) as LeaseRow[];
+    const userLeases = await sql`
+      SELECT id, "propertyAddress", "expirationDate", "monthlyRent"
+      FROM leases WHERE "userId" = ${user.id} AND status = 'completed'
+    ` as LeaseRow[];
 
     if (userLeases.length === 0) continue;
 

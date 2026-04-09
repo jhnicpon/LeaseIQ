@@ -9,8 +9,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = getDb();
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(session.user.email) as any;
+  const sql = getDb();
+  const userRows = await sql`SELECT id FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as any;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   const { searchParams } = new URL(req.url);
@@ -19,21 +20,23 @@ export async function GET(req: NextRequest) {
   const sort = searchParams.get('sort') || 'uploadedAt';
   const order = searchParams.get('order') || 'desc';
 
-  let query = 'SELECT * FROM leases WHERE userId = ?';
-  const params: any[] = [user.id];
-
-  if (search) {
-    query += ` AND (propertyAddress LIKE ? OR tenantName LIKE ? OR extractedData LIKE ?)`;
-    const searchParam = `%${search}%`;
-    params.push(searchParam, searchParam, searchParam);
-  }
-
   const allowedSorts = ['uploadedAt', 'propertyAddress', 'tenantName', 'expirationDate', 'monthlyRent'];
   const sortCol = allowedSorts.includes(sort) ? sort : 'uploadedAt';
   const sortOrder = order === 'asc' ? 'ASC' : 'DESC';
-  query += ` ORDER BY ${sortCol} ${sortOrder}`;
 
-  const leases = db.prepare(query).all(...params);
+  let leases: any[];
+  if (search) {
+    const like = `%${search}%`;
+    leases = await sql.query(
+      `SELECT * FROM leases WHERE "userId" = $1 AND ("propertyAddress" ILIKE $2 OR "tenantName" ILIKE $2 OR "extractedData" ILIKE $2) ORDER BY "${sortCol}" ${sortOrder}`,
+      [user.id, like]
+    );
+  } else {
+    leases = await sql.query(
+      `SELECT * FROM leases WHERE "userId" = $1 ORDER BY "${sortCol}" ${sortOrder}`,
+      [user.id]
+    );
+  }
 
   if (format === 'excel') {
     const buffer = exportToExcel(leases as any[]);

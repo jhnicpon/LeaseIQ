@@ -15,25 +15,25 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
   }
 
-  const db = getDb();
+  const sql = getDb();
 
-  const codes = db.prepare(`
+  const codes = await sql`
     SELECT pc.id, pc.code, pc.plan, pc.discount_type, pc.is_active,
            COUNT(pcu.id) as use_count
     FROM promo_codes pc
     LEFT JOIN promo_code_uses pcu ON pcu.promo_code_id = pc.id
     GROUP BY pc.id
     ORDER BY pc.created_at DESC
-  `).all() as any[];
+  `;
 
-  const uses = db.prepare(`
+  const uses = await sql`
     SELECT pcu.id, pcu.used_at, pc.code, pc.plan,
            u.name as user_name, u.email as user_email
     FROM promo_code_uses pcu
     JOIN promo_codes pc ON pc.id = pcu.promo_code_id
     JOIN users u ON u.id = pcu.user_id
     ORDER BY pcu.used_at DESC
-  `).all() as any[];
+  `;
 
   return NextResponse.json({ codes, uses });
 }

@@ -9,10 +9,9 @@ export async function POST() {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = getDb();
-  const user = db.prepare('SELECT stripeCustomerId FROM users WHERE email = ?').get(session.user.email) as
-    | { stripeCustomerId: string | null }
-    | undefined;
+  const sql = getDb();
+  const userRows = await sql`SELECT "stripeCustomerId" FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as { stripeCustomerId: string | null } | undefined;
 
   if (!user?.stripeCustomerId) {
     return NextResponse.json({ error: 'No subscription found' }, { status: 404 });

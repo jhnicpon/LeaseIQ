@@ -8,11 +8,13 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const db = getDb();
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(session.user.email) as any;
+  const sql = getDb();
+  const userRows = await sql`SELECT id FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as any;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  const lease = db.prepare('SELECT * FROM leases WHERE id = ? AND userId = ?').get(id, user.id);
+  const leaseRows = await sql`SELECT * FROM leases WHERE id = ${id} AND "userId" = ${user.id}`;
+  const lease = leaseRows[0];
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
 
   const buffer = exportToExcel([lease]);

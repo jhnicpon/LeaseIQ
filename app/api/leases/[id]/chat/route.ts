@@ -13,11 +13,13 @@ export async function POST(
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const db = getDb();
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(session.user.email) as { id: string } | undefined;
+  const sql = getDb();
+  const userRows = await sql`SELECT id FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as any;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  const lease = db.prepare('SELECT * FROM leases WHERE id = ? AND userId = ?').get(id, user.id) as any;
+  const leaseRows = await sql`SELECT * FROM leases WHERE id = ${id} AND "userId" = ${user.id}`;
+  const lease = leaseRows[0] as any;
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
 
   const body = await req.json();
@@ -62,32 +64,21 @@ When answering:
       model: 'claude-sonnet-4-6',
       max_tokens: 1500,
       system: systemPrompt,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content,
-      })),
+      messages: messages.map(m => ({ role: m.role, content: m.content })),
     });
 
     const content = message.content[0];
     if (content.type !== 'text') throw new Error('Unexpected response type');
 
-    const text = content.text;
-
-    // Try to parse as JSON
     try {
-      const jsonMatch = text.match(/\{[\s\S]*\}/);
+      const jsonMatch = content.text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
-        return NextResponse.json({
-          answer: parsed.answer || text,
-          citations: parsed.citations || [],
-        });
+        return NextResponse.json({ answer: parsed.answer || content.text, citations: parsed.citations || [] });
       }
-    } catch {
-      // Fall through to raw text
-    }
+    } catch { /* fall through */ }
 
-    return NextResponse.json({ answer: text, citations: [] });
+    return NextResponse.json({ answer: content.text, citations: [] });
   } catch (err) {
     console.error('Chat error:', err);
     return NextResponse.json({ error: 'Chat failed. Please try again.' }, { status: 500 });

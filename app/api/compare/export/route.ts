@@ -71,11 +71,15 @@ export async function GET(req: NextRequest) {
   const ids = req.nextUrl.searchParams.get('ids')?.split(',').filter(Boolean) ?? [];
   if (ids.length < 2) return NextResponse.json({ error: 'Need at least 2 lease IDs' }, { status: 400 });
 
-  const db = getDb();
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(session.user.email) as { id: string } | undefined;
+  const sql = getDb();
+  const userRows = await sql`SELECT id FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as { id: string } | undefined;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  const leases: any[] = ids.map(lid => db.prepare('SELECT * FROM leases WHERE id = ? AND userId = ?').get(lid, user.id)).filter(Boolean);
+  const leasesRaw = await Promise.all(
+    ids.map(lid => sql`SELECT * FROM leases WHERE id = ${lid} AND "userId" = ${user.id}`)
+  );
+  const leases: any[] = leasesRaw.map(r => r[0]).filter(Boolean);
   if (leases.length < 2) return NextResponse.json({ error: 'Leases not found' }, { status: 404 });
 
   const datas = leases.map(l => l.extractedData ? JSON.parse(l.extractedData) : {});

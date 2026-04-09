@@ -15,10 +15,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid plan' }, { status: 400 });
   }
 
-  const db = getDb();
-  const user = db.prepare('SELECT id, stripeCustomerId FROM users WHERE email = ?').get(session.user.email) as
-    | { id: string; stripeCustomerId: string | null }
-    | undefined;
+  const sql = getDb();
+  const userRows = await sql`SELECT id, "stripeCustomerId" FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as { id: string; stripeCustomerId: string | null } | undefined;
 
   if (!user) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 });
@@ -32,7 +31,7 @@ export async function POST(req: NextRequest) {
       metadata: { userId: user.id },
     });
     customerId = customer.id;
-    db.prepare('UPDATE users SET stripeCustomerId = ? WHERE id = ?').run(customerId, user.id);
+    await sql`UPDATE users SET "stripeCustomerId" = ${customerId} WHERE id = ${user.id}`;
   }
 
   const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';

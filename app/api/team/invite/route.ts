@@ -19,10 +19,9 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const db = getDb();
-  const owner = db.prepare('SELECT id, name, plan FROM users WHERE email = ?').get(session.user.email) as
-    | { id: string; name: string; plan: string }
-    | undefined;
+  const sql = getDb();
+  const ownerRows = await sql`SELECT id, name, plan FROM users WHERE email = ${session.user.email}`;
+  const owner = ownerRows[0] as { id: string; name: string; plan: string } | undefined;
   if (!owner) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   if (owner.plan === 'free') {
@@ -35,16 +34,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid email or role' }, { status: 400 });
   }
 
-  // Check if already invited
-  const existing = db.prepare('SELECT id FROM team_members WHERE accountId = ? AND invitedEmail = ?').get(owner.id, email);
-  if (existing) return NextResponse.json({ error: 'This email has already been invited' }, { status: 409 });
+  const existingRows = await sql`SELECT id FROM team_members WHERE "accountId" = ${owner.id} AND "invitedEmail" = ${email}`;
+  if (existingRows[0]) return NextResponse.json({ error: 'This email has already been invited' }, { status: 409 });
 
   const inviteToken = uuidv4();
   const memberId = uuidv4();
-  db.prepare(`
-    INSERT INTO team_members (id, accountId, role, invitedEmail, inviteToken)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(memberId, owner.id, role, email, inviteToken);
+  await sql`
+    INSERT INTO team_members (id, "accountId", role, "invitedEmail", "inviteToken")
+    VALUES (${memberId}, ${owner.id}, ${role}, ${email}, ${inviteToken})
+  `;
 
   const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
   const acceptUrl = `${baseUrl}/team/accept?token=${inviteToken}`;

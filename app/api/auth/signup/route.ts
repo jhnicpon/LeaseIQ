@@ -22,9 +22,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Password must be at least 8 characters' }, { status: 400 });
     }
 
-    const db = getDb();
-    const existing = db.prepare('SELECT id FROM users WHERE email = ?').get(email);
-    if (existing) {
+    const sql = getDb();
+
+    const existing = await sql`SELECT id FROM users WHERE email = ${email}`;
+    if (existing[0]) {
       return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
     }
 
@@ -32,8 +33,8 @@ export async function POST(req: NextRequest) {
     let promoInfo: { plan: string; type: string } | undefined;
     let normalizedCode: string | undefined;
     if (promoCode) {
-      normalizedCode = promoCode.trim().toLowerCase();
-      promoInfo = VALID_CODES[normalizedCode as string];
+      normalizedCode = (promoCode as string).trim().toLowerCase();
+      promoInfo = VALID_CODES[normalizedCode];
       if (!promoInfo) {
         return NextResponse.json({ error: 'Invalid promo code' }, { status: 400 });
       }
@@ -43,25 +44,25 @@ export async function POST(req: NextRequest) {
     const id = uuidv4();
     const trialEnd = promoInfo ? format(addDays(new Date(), 30), 'yyyy-MM-dd') : null;
 
-    db.prepare(
-      'INSERT INTO users (id, name, email, passwordHash, plan, promoCode, promoTrialEnd) VALUES (?, ?, ?, ?, ?, ?, ?)'
-    ).run(
-      id, name, email, passwordHash,
-      promoInfo ? promoInfo.plan : 'free',
-      normalizedCode ?? null,
-      trialEnd
-    );
+    await sql`
+      INSERT INTO users (id, name, email, "passwordHash", plan, "promoCode", "promoTrialEnd")
+      VALUES (
+        ${id}, ${name}, ${email}, ${passwordHash},
+        ${promoInfo ? promoInfo.plan : 'free'},
+        ${normalizedCode ?? null},
+        ${trialEnd}
+      )
+    `;
 
     // Best-effort: record usage in promo_codes table if the row exists
     if (promoInfo && normalizedCode) {
       try {
-        const promoRow = db.prepare(
-          'SELECT id FROM promo_codes WHERE code = ?'
-        ).get(normalizedCode) as { id: string } | undefined;
-        if (promoRow) {
-          db.prepare(
-            'INSERT INTO promo_code_uses (id, promo_code_id, user_id) VALUES (?, ?, ?)'
-          ).run(uuidv4(), promoRow.id, id);
+        const promoRows = await sql`SELECT id FROM promo_codes WHERE code = ${normalizedCode}`;
+        if (promoRows[0]) {
+          await sql`
+            INSERT INTO promo_code_uses (id, promo_code_id, user_id)
+            VALUES (${uuidv4()}, ${(promoRows[0] as any).id}, ${id})
+          `;
         }
       } catch {
         // Non-critical — don't fail signup if tracking insert fails

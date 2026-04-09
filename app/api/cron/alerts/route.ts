@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = getDb();
+  const sql = getDb();
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -33,15 +33,13 @@ export async function GET(req: NextRequest) {
     tenantName: string | null;
   };
 
-  // Fetch all active leases with expiration dates
-  const leases = db.prepare(`
-    SELECT l.id as leaseId, l.userId, u.email, u.name, l.expirationDate, l.propertyAddress, l.tenantName
+  const leases = await sql`
+    SELECT l.id as "leaseId", l."userId", u.email, u.name, l."expirationDate", l."propertyAddress", l."tenantName"
     FROM leases l
-    JOIN users u ON u.id = l.userId
-    WHERE l.expirationDate IS NOT NULL AND l.status = 'completed'
-  `).all() as LeaseRow[];
+    JOIN users u ON u.id = l."userId"
+    WHERE l."expirationDate" IS NOT NULL AND l.status = 'completed'
+  ` as LeaseRow[];
 
-  // Group alerts per user per threshold
   const userAlerts = new Map<string, Map<number, LeaseRow[]>>();
 
   for (const lease of leases) {

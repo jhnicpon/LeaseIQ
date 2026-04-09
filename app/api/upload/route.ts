@@ -15,8 +15,9 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const db = getDb();
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(session.user.email) as any;
+  const sql = getDb();
+  const userRows = await sql`SELECT id FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as any;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   if (!fs.existsSync(UPLOADS_DIR)) {
@@ -39,60 +40,48 @@ export async function POST(req: NextRequest) {
   fs.writeFileSync(filePath, Buffer.from(bytes));
 
   // Create lease record
-  db.prepare(`
-    INSERT INTO leases (id, userId, fileName, fileSize, status)
-    VALUES (?, ?, ?, ?, 'processing')
-  `).run(leaseId, user.id, file.name, file.size);
+  await sql`
+    INSERT INTO leases (id, "userId", "fileName", "fileSize", status)
+    VALUES (${leaseId}, ${user.id}, ${file.name}, ${file.size}, 'processing')
+  `;
 
-  // Process async
-  processLease(leaseId, filePath, user.id, db).catch(err => {
+  // Process async (fire-and-forget)
+  processLease(leaseId, filePath, user.id).catch(async err => {
     console.error('Lease processing error:', err);
-    db.prepare("UPDATE leases SET status = 'error' WHERE id = ?").run(leaseId);
+    const s = getDb();
+    await s`UPDATE leases SET status = 'error' WHERE id = ${leaseId}`.catch(() => {});
   });
 
   return NextResponse.json({ leaseId, status: 'processing' });
 }
 
-async function processLease(leaseId: string, filePath: string, userId: string, db: any) {
+async function processLease(leaseId: string, filePath: string, userId: string) {
+  const sql = getDb();
   try {
     const text = await parsePdf(filePath);
     const extracted = await extractLeaseData(text);
-
-    const now = new Date().toISOString();
     const risk = calculateRiskScore(extracted);
 
-    db.prepare(`
+    await sql`
       UPDATE leases SET
         status = 'completed',
-        processedAt = ?,
-        extractedData = ?,
-        originalText = ?,
-        propertyAddress = ?,
-        tenantName = ?,
-        expirationDate = ?,
-        monthlyRent = ?,
-        riskScore = ?,
-        riskFactors = ?
-      WHERE id = ?
-    `).run(
-      now,
-      JSON.stringify(extracted),
-      text.substring(0, 100000),
-      extracted.propertyAddress,
-      extracted.tenantName,
-      extracted.leaseExpirationDate,
-      extracted.baseRentMonthly,
-      risk.score,
-      JSON.stringify(risk.factors),
-      leaseId
-    );
+        "processedAt" = NOW(),
+        "extractedData" = ${JSON.stringify(extracted)},
+        "originalText" = ${text.substring(0, 100000)},
+        "propertyAddress" = ${extracted.propertyAddress},
+        "tenantName" = ${extracted.tenantName},
+        "expirationDate" = ${extracted.leaseExpirationDate},
+        "monthlyRent" = ${extracted.baseRentMonthly},
+        "riskScore" = ${risk.score},
+        "riskFactors" = ${JSON.stringify(risk.factors)}
+      WHERE id = ${leaseId}
+    `;
 
     // Create version 1
-    const { v4: uuidv4ver } = await import('uuid');
-    db.prepare(`
-      INSERT INTO lease_versions (id, leaseId, userId, version, extractedData, changeDescription, changedBy)
-      VALUES (?, ?, ?, 1, ?, 'Initial extraction', 'AI')
-    `).run(uuidv4ver(), leaseId, userId, JSON.stringify(extracted));
+    await sql`
+      INSERT INTO lease_versions (id, "leaseId", "userId", version, "extractedData", "changeDescription", "changedBy")
+      VALUES (${uuidv4()}, ${leaseId}, ${userId}, ${1}, ${JSON.stringify(extracted)}, ${'Initial extraction'}, ${'AI'})
+    `;
 
     // Generate alerts for critical dates
     const criticalDates = [
@@ -105,15 +94,16 @@ async function processLease(leaseId: string, filePath: string, userId: string, d
       if (date) {
         const alertDates = generateAlertDates(date);
         for (const { daysBeforeDate, triggerDate } of alertDates) {
-          const alertId = uuidv4();
-          db.prepare(`
-            INSERT OR IGNORE INTO alerts (id, leaseId, userId, alertType, triggerDate)
-            VALUES (?, ?, ?, ?, ?)
-          `).run(alertId, leaseId, userId, `${type} - ${daysBeforeDate} days`, triggerDate);
+          await sql`
+            INSERT INTO alerts (id, "leaseId", "userId", "alertType", "triggerDate")
+            VALUES (${uuidv4()}, ${leaseId}, ${userId}, ${`${type} - ${daysBeforeDate} days`}, ${triggerDate})
+            ON CONFLICT DO NOTHING
+          `;
         }
       }
     }
   } catch (error) {
+    await sql`UPDATE leases SET status = 'error' WHERE id = ${leaseId}`;
     throw error;
   }
 }

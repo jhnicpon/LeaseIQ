@@ -16,11 +16,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const db = getDb();
-  const user = db.prepare('SELECT id, email FROM users WHERE email = ?').get(session.user.email) as { id: string; email: string } | undefined;
+  const sql = getDb();
+  const userRows = await sql`SELECT id, email FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as { id: string; email: string } | undefined;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  const lease = db.prepare('SELECT * FROM leases WHERE id = ? AND userId = ?').get(id, user.id) as any;
+  const leaseRows = await sql`SELECT * FROM leases WHERE id = ${id} AND "userId" = ${user.id}`;
+  const lease = leaseRows[0] as any;
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
 
   const formData = await req.formData();
@@ -67,33 +69,31 @@ Return ONLY a JSON object with the changed fields. Example: {"baseRentMonthly": 
   const changedFields = Object.keys(changes);
 
   // Save current as a version before applying amendment
-  const maxVersion = (db.prepare('SELECT MAX(version) as v FROM lease_versions WHERE leaseId = ?').get(id) as any)?.v ?? 0;
-  db.prepare(`
-    INSERT INTO lease_versions (id, leaseId, userId, version, extractedData, changeDescription, changedBy)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    uuidv4(), id, user.id, maxVersion + 1, lease.extractedData,
-    `Before amendment: ${file.name}`, user.email
-  );
+  const maxVRows = await sql`SELECT MAX(version) as v FROM lease_versions WHERE "leaseId" = ${id}`;
+  const maxVersion = (maxVRows[0] as any)?.v ?? 0;
 
-  // Apply changes
+  await sql`
+    INSERT INTO lease_versions (id, "leaseId", "userId", version, "extractedData", "changeDescription", "changedBy")
+    VALUES (
+      ${uuidv4()}, ${id}, ${user.id}, ${maxVersion + 1},
+      ${lease.extractedData}, ${`Before amendment: ${file.name}`}, ${user.email}
+    )
+  `;
+
   const updated = { ...currentData, ...changes };
   const risk = calculateRiskScore(updated);
 
-  db.prepare(`
+  await sql`
     UPDATE leases SET
-      extractedData = ?, propertyAddress = ?, tenantName = ?,
-      expirationDate = ?, monthlyRent = ?, riskScore = ?, riskFactors = ?
-    WHERE id = ?
-  `).run(
-    JSON.stringify(updated),
-    updated.propertyAddress || lease.propertyAddress,
-    updated.tenantName || lease.tenantName,
-    updated.leaseExpirationDate || lease.expirationDate,
-    updated.baseRentMonthly || lease.monthlyRent,
-    risk.score, JSON.stringify(risk.factors),
-    id
-  );
+      "extractedData" = ${JSON.stringify(updated)},
+      "propertyAddress" = ${updated.propertyAddress || lease.propertyAddress},
+      "tenantName" = ${updated.tenantName || lease.tenantName},
+      "expirationDate" = ${updated.leaseExpirationDate || lease.expirationDate},
+      "monthlyRent" = ${updated.baseRentMonthly || lease.monthlyRent},
+      "riskScore" = ${risk.score},
+      "riskFactors" = ${JSON.stringify(risk.factors)}
+    WHERE id = ${id}
+  `;
 
   return NextResponse.json({ success: true, changedFields, changes });
 }

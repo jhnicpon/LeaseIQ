@@ -8,21 +8,21 @@ export async function POST(req: NextRequest) {
 
   const session = await getServerSession();
   if (!session?.user?.email) {
-    // Not logged in — redirect to sign-in preserving the token
     return NextResponse.json({ error: 'Please sign in or create an account to accept this invitation.', requiresAuth: true }, { status: 401 });
   }
 
-  const db = getDb();
-  const member = db.prepare('SELECT * FROM team_members WHERE inviteToken = ?').get(token) as any;
+  const sql = getDb();
+  const memberRows = await sql`SELECT * FROM team_members WHERE "inviteToken" = ${token}`;
+  const member = memberRows[0] as any;
   if (!member) return NextResponse.json({ error: 'Invalid or expired invitation token.' }, { status: 404 });
   if (member.acceptedAt) return NextResponse.json({ error: 'This invitation has already been accepted.' }, { status: 409 });
 
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(session.user.email) as { id: string } | undefined;
+  const userRows = await sql`SELECT id FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as { id: string } | undefined;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   const now = new Date().toISOString();
-  db.prepare('UPDATE team_members SET userId = ?, acceptedAt = ?, inviteToken = NULL WHERE id = ?')
-    .run(user.id, now, member.id);
+  await sql`UPDATE team_members SET "userId" = ${user.id}, "acceptedAt" = ${now}, "inviteToken" = NULL WHERE id = ${member.id}`;
 
   return NextResponse.json({ success: true });
 }

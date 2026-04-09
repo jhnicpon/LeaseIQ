@@ -20,16 +20,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Webhook signature verification failed' }, { status: 400 });
   }
 
-  const db = getDb();
+  const sql = getDb();
 
   switch (event.type) {
     case 'checkout.session.completed': {
       const cs = event.data.object as Stripe.Checkout.Session;
       const { userId, plan } = cs.metadata ?? {};
       if (userId && plan && cs.subscription) {
-        db.prepare(
-          'UPDATE users SET plan = ?, stripeSubscriptionId = ?, subscriptionStatus = ? WHERE id = ?'
-        ).run(plan, cs.subscription as string, 'active', userId);
+        await sql`
+          UPDATE users SET plan = ${plan}, "stripeSubscriptionId" = ${cs.subscription as string}, "subscriptionStatus" = 'active'
+          WHERE id = ${userId}
+        `;
       }
       break;
     }
@@ -37,18 +38,17 @@ export async function POST(req: NextRequest) {
     case 'customer.subscription.updated': {
       const sub = event.data.object as Stripe.Subscription;
       const customerId = sub.customer as string;
-      db.prepare(
-        'UPDATE users SET subscriptionStatus = ? WHERE stripeCustomerId = ?'
-      ).run(sub.status, customerId);
+      await sql`UPDATE users SET "subscriptionStatus" = ${sub.status} WHERE "stripeCustomerId" = ${customerId}`;
       break;
     }
 
     case 'customer.subscription.deleted': {
       const sub = event.data.object as Stripe.Subscription;
       const customerId = sub.customer as string;
-      db.prepare(
-        "UPDATE users SET plan = 'free', stripeSubscriptionId = NULL, subscriptionStatus = 'canceled' WHERE stripeCustomerId = ?"
-      ).run(customerId);
+      await sql`
+        UPDATE users SET plan = 'free', "stripeSubscriptionId" = NULL, "subscriptionStatus" = 'canceled'
+        WHERE "stripeCustomerId" = ${customerId}
+      `;
       break;
     }
   }

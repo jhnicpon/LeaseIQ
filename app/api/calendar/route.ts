@@ -2,19 +2,20 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import getDb from '@/lib/db';
 
-export async function GET(req: NextRequest) {
+export async function GET(_req: NextRequest) {
   const session = await getServerSession();
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const db = getDb();
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(session.user.email) as any;
+  const sql = getDb();
+  const userRows = await sql`SELECT id FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as any;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  const leases = db.prepare("SELECT * FROM leases WHERE userId = ? AND status = 'completed'").all(user.id) as any[];
+  const leases = await sql`SELECT * FROM leases WHERE "userId" = ${user.id} AND status = 'completed'`;
 
   const events: any[] = [];
 
-  for (const lease of leases) {
+  for (const lease of leases as any[]) {
     if (!lease.extractedData) continue;
     const data = JSON.parse(lease.extractedData);
 

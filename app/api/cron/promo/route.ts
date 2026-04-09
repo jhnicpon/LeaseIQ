@@ -11,38 +11,37 @@ export const dynamic = 'force-dynamic';
 //   2. Downgrades users to 'free' when their trial has expired
 
 export async function GET(req: NextRequest) {
-  // Simple secret check to prevent public invocation
   const secret = req.headers.get('x-cron-secret') ?? req.nextUrl.searchParams.get('secret');
   if (process.env.CRON_SECRET && secret !== process.env.CRON_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = getDb();
+  const sql = getDb();
   const today = format(new Date(), 'yyyy-MM-dd');
   const in7Days = format(addDays(new Date(), 7), 'yyyy-MM-dd');
 
   // ── 1. Downgrade expired trials ───────────────────────────────────────────
-  const expired = db.prepare(`
-    SELECT id, name, email, promoTrialEnd FROM users
-    WHERE promoCode IS NOT NULL
-      AND promoTrialEnd IS NOT NULL
-      AND promoTrialEnd < ?
+  const expired = await sql`
+    SELECT id, name, email, "promoTrialEnd" FROM users
+    WHERE "promoCode" IS NOT NULL
+      AND "promoTrialEnd" IS NOT NULL
+      AND "promoTrialEnd" < ${today}
       AND plan != 'free'
-      AND (stripeSubscriptionId IS NULL OR subscriptionStatus != 'active')
-  `).all(today) as { id: string; name: string; email: string; promoTrialEnd: string }[];
+      AND ("stripeSubscriptionId" IS NULL OR "subscriptionStatus" != 'active')
+  ` as { id: string; name: string; email: string; promoTrialEnd: string }[];
 
   for (const user of expired) {
-    db.prepare("UPDATE users SET plan = 'free' WHERE id = ?").run(user.id);
+    await sql`UPDATE users SET plan = 'free' WHERE id = ${user.id}`;
   }
 
   // ── 2. Send 7-day warning emails ─────────────────────────────────────────
-  const endingSoon = db.prepare(`
-    SELECT id, name, email, promoTrialEnd FROM users
-    WHERE promoCode IS NOT NULL
-      AND promoTrialEnd IS NOT NULL
-      AND promoTrialEnd = ?
+  const endingSoon = await sql`
+    SELECT id, name, email, "promoTrialEnd" FROM users
+    WHERE "promoCode" IS NOT NULL
+      AND "promoTrialEnd" IS NOT NULL
+      AND "promoTrialEnd" = ${in7Days}
       AND plan != 'free'
-  `).all(in7Days) as { id: string; name: string; email: string; promoTrialEnd: string }[];
+  ` as { id: string; name: string; email: string; promoTrialEnd: string }[];
 
   let emailsSent = 0;
   for (const user of endingSoon) {

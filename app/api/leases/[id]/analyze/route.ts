@@ -203,11 +203,11 @@ Return ONLY a valid JSON object with exactly this structure (no markdown, no exp
 }
 
 IMPORTANT INSTRUCTIONS:
-- For totalCostOfOccupancy: calculate base rent × lease term months (use 0 if data unavailable)
+- For totalCostOfOccupancy: calculate base rent x lease term months (use 0 if data unavailable)
 - For totalCostWithEscalations: estimate total with rent increases over the full term (use 0 if data unavailable)
 - For effectiveRent: calculate monthly after accounting for free rent periods spread over the full term
 - Include at least 5 risks in riskAnalysis
-- Include at least 8 clauses in clauseExplainer — cover: base rent, CAM/operating expenses, renewal options, termination, assignment/sublease, personal guaranty, holdover, repairs/maintenance
+- Include at least 8 clauses in clauseExplainer
 - Include all 6 scenario analyses exactly as specified above
 - Be honest and direct — if this is a bad deal for the tenant, say so`;
 }
@@ -220,18 +220,19 @@ export async function GET(
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const db = getDb();
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(session.user.email) as { id: string } | undefined;
+  const sql = getDb();
+  const userRows = await sql`SELECT id FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as any;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  const lease = db.prepare('SELECT id, status, aiAnalysis FROM leases WHERE id = ? AND userId = ?').get(id, user.id) as any;
+  const leaseRows = await sql`SELECT id, status, "aiAnalysis" FROM leases WHERE id = ${id} AND "userId" = ${user.id}`;
+  const lease = leaseRows[0] as any;
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
 
   if (!lease.aiAnalysis) return NextResponse.json({ analysis: null });
 
   try {
-    const analysis = JSON.parse(lease.aiAnalysis);
-    return NextResponse.json({ analysis });
+    return NextResponse.json({ analysis: JSON.parse(lease.aiAnalysis) });
   } catch {
     return NextResponse.json({ analysis: null });
   }
@@ -245,11 +246,13 @@ export async function POST(
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const { id } = await params;
-  const db = getDb();
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(session.user.email) as { id: string } | undefined;
+  const sql = getDb();
+  const userRows = await sql`SELECT id FROM users WHERE email = ${session.user.email}`;
+  const user = userRows[0] as any;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  const lease = db.prepare('SELECT * FROM leases WHERE id = ? AND userId = ?').get(id, user.id) as any;
+  const leaseRows = await sql`SELECT * FROM leases WHERE id = ${id} AND "userId" = ${user.id}`;
+  const lease = leaseRows[0] as any;
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
 
   if (lease.status !== 'completed') {
@@ -268,7 +271,6 @@ export async function POST(
 
   try {
     const prompt = buildAnalysisPrompt(extractedData, originalText);
-
     const message = await client.messages.create({
       model: 'claude-sonnet-4-6',
       max_tokens: 8000,
@@ -278,13 +280,11 @@ export async function POST(
     const content = message.content[0];
     if (content.type !== 'text') throw new Error('Unexpected response type from Claude');
 
-    const text = content.text;
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    const jsonMatch = content.text.match(/\{[\s\S]*\}/);
     if (!jsonMatch) throw new Error('No JSON found in Claude response');
 
     const analysis = JSON.parse(jsonMatch[0]);
-
-    db.prepare('UPDATE leases SET aiAnalysis = ? WHERE id = ?').run(JSON.stringify(analysis), id);
+    await sql`UPDATE leases SET "aiAnalysis" = ${JSON.stringify(analysis)} WHERE id = ${id}`;
 
     return NextResponse.json({ analysis });
   } catch (err) {

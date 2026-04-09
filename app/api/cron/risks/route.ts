@@ -14,16 +14,21 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
-  const db = getDb();
-  const leases = db.prepare("SELECT id, extractedData FROM leases WHERE status = 'completed' AND extractedData IS NOT NULL").all() as { id: string; extractedData: string }[];
+  const sql = getDb();
+  const leases = await sql`
+    SELECT id, "extractedData" FROM leases
+    WHERE status = 'completed' AND "extractedData" IS NOT NULL
+  ` as { id: string; extractedData: string }[];
 
   let updated = 0;
   for (const lease of leases) {
     try {
       const data = JSON.parse(lease.extractedData);
       const risk = calculateRiskScore(data);
-      db.prepare('UPDATE leases SET riskScore = ?, riskFactors = ? WHERE id = ?')
-        .run(risk.score, JSON.stringify(risk.factors), lease.id);
+      await sql`
+        UPDATE leases SET "riskScore" = ${risk.score}, "riskFactors" = ${JSON.stringify(risk.factors)}
+        WHERE id = ${lease.id}
+      `;
       updated++;
     } catch { /* skip malformed */ }
   }
