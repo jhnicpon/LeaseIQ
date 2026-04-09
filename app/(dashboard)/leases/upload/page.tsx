@@ -59,21 +59,35 @@ export default function UploadPage() {
       let attempts = 0;
       const poll = setInterval(async () => {
         attempts++;
-        const statusRes = await fetch(`/api/leases/${data.leaseId}`);
-        const statusData = await statusRes.json();
+        try {
+          const statusRes = await fetch(`/api/leases/${data.leaseId}`);
+          const statusData = await statusRes.json();
 
-        if (statusData.lease?.status === 'completed') {
-          clearInterval(poll);
-          setState('success');
-          setTimeout(() => router.push(`/leases/${data.leaseId}`), 1500);
-        } else if (statusData.lease?.status === 'error' || attempts > 60) {
-          clearInterval(poll);
-          setError('Processing failed. Please try again.');
-          setState('error');
+          if (statusData.lease?.status === 'completed') {
+            clearInterval(poll);
+            setState('success');
+            setTimeout(() => router.push(`/leases/${data.leaseId}`), 1500);
+          } else if (statusData.lease?.status === 'error') {
+            clearInterval(poll);
+            setError('AI extraction failed. This can happen with scanned PDFs or very unusual formatting. Please try reprocessing from the lease page, or contact support if the problem persists.');
+            setState('error');
+          } else if (attempts > 60) {
+            clearInterval(poll);
+            setError('Processing is taking longer than expected. Your lease may still complete — check the Leases page in a few minutes.');
+            setState('error');
+          }
+        } catch {
+          // Network hiccup during polling — keep trying
         }
       }, 3000);
-    } catch {
-      setError('Upload failed. Please check your connection.');
+    } catch (err: any) {
+      if (err?.message?.includes('413') || err?.message?.includes('too large')) {
+        setError('File too large. Please ensure your PDF is under 50 MB. Try compressing it with a tool like Smallpdf.');
+      } else if (!navigator.onLine) {
+        setError('You appear to be offline. Please check your internet connection and try again.');
+      } else {
+        setError('Upload failed. Please check your connection and try again. If the problem persists, try a different PDF or contact support.');
+      }
       setState('error');
     }
   };
@@ -134,9 +148,17 @@ export default function UploadPage() {
           )}
 
           {error && (
-            <div className="mt-4 flex items-center gap-2 bg-red-900/20 border border-red-800 rounded-lg p-3 text-red-400 text-sm">
-              <AlertCircle className="h-4 w-4 flex-shrink-0" />
-              {error}
+            <div className="mt-4 bg-red-900/20 border border-red-800 rounded-lg p-4">
+              <div className="flex gap-2 text-red-400 text-sm">
+                <AlertCircle className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                <p>{error}</p>
+              </div>
+              <button
+                onClick={() => { setError(''); setState('idle'); }}
+                className="mt-3 text-xs text-red-400 hover:text-red-300 underline underline-offset-2"
+              >
+                Dismiss and try again
+              </button>
             </div>
           )}
 

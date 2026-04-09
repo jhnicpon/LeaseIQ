@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
 
   // Upload to Vercel Blob (persistent, CDN-backed storage)
   const blob = await put(blobPath, buffer, {
-    access: 'public',
+    access: 'private',
     contentType: 'application/pdf',
   });
 
