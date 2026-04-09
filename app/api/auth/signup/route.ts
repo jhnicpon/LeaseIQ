@@ -5,6 +5,11 @@ import { addDays, format } from 'date-fns';
 import getDb from '@/lib/db';
 import { sendWelcomeEmail } from '@/lib/email';
 
+// Hardcoded valid promo codes — validation never depends on the database
+const VALID_CODES: Record<string, { plan: string; type: string }> = {
+  'mustanges2028': { plan: 'professional', type: 'free_month' },
+};
+
 export async function POST(req: NextRequest) {
   try {
     const { name, email, password, promoCode } = await req.json();
@@ -23,36 +28,44 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Email already registered' }, { status: 409 });
     }
 
-    // Validate promo code if provided
-    let promoRecord: { id: string; plan: string } | undefined;
+    // Validate promo code against hardcoded list — no DB lookup required
+    let promoInfo: { plan: string; type: string } | undefined;
+    let normalizedCode: string | undefined;
     if (promoCode) {
-      const normalized = promoCode.trim().toLowerCase();
-      promoRecord = db.prepare(
-        'SELECT id, plan FROM promo_codes WHERE code = ? AND is_active = 1'
-      ).get(normalized) as { id: string; plan: string } | undefined;
-
-      if (!promoRecord) {
+      normalizedCode = promoCode.trim().toLowerCase();
+      promoInfo = VALID_CODES[normalizedCode as string];
+      if (!promoInfo) {
         return NextResponse.json({ error: 'Invalid promo code' }, { status: 400 });
       }
     }
 
     const passwordHash = await bcrypt.hash(password, 12);
     const id = uuidv4();
+    const trialEnd = promoInfo ? format(addDays(new Date(), 30), 'yyyy-MM-dd') : null;
 
-    if (promoRecord) {
-      // Promo user: set plan to professional, set trial end date 30 days from now
-      const trialEnd = format(addDays(new Date(), 30), 'yyyy-MM-dd');
-      const normalizedCode = promoCode!.trim().toLowerCase();
-      db.prepare(
-        'INSERT INTO users (id, name, email, passwordHash, plan, promoCode, promoTrialEnd) VALUES (?, ?, ?, ?, ?, ?, ?)'
-      ).run(id, name, email, passwordHash, promoRecord.plan, normalizedCode, trialEnd);
+    db.prepare(
+      'INSERT INTO users (id, name, email, passwordHash, plan, promoCode, promoTrialEnd) VALUES (?, ?, ?, ?, ?, ?, ?)'
+    ).run(
+      id, name, email, passwordHash,
+      promoInfo ? promoInfo.plan : 'free',
+      normalizedCode ?? null,
+      trialEnd
+    );
 
-      // Record the promo code usage
-      db.prepare(
-        'INSERT INTO promo_code_uses (id, promo_code_id, user_id) VALUES (?, ?, ?)'
-      ).run(uuidv4(), promoRecord.id, id);
-    } else {
-      db.prepare('INSERT INTO users (id, name, email, passwordHash) VALUES (?, ?, ?, ?)').run(id, name, email, passwordHash);
+    // Best-effort: record usage in promo_codes table if the row exists
+    if (promoInfo && normalizedCode) {
+      try {
+        const promoRow = db.prepare(
+          'SELECT id FROM promo_codes WHERE code = ?'
+        ).get(normalizedCode) as { id: string } | undefined;
+        if (promoRow) {
+          db.prepare(
+            'INSERT INTO promo_code_uses (id, promo_code_id, user_id) VALUES (?, ?, ?)'
+          ).run(uuidv4(), promoRow.id, id);
+        }
+      } catch {
+        // Non-critical — don't fail signup if tracking insert fails
+      }
     }
 
     // Send welcome email (non-blocking)
@@ -60,8 +73,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      promoApplied: !!promoRecord,
-      message: promoRecord
+      promoApplied: !!promoInfo,
+      message: promoInfo
         ? 'Promo code applied! You get 1 month of Professional free.'
         : undefined,
     });
