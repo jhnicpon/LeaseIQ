@@ -1,22 +1,16 @@
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-function createTransport() {
-  return nodemailer.createTransport({
-    host: process.env.SMTP_HOST ?? 'smtp.gmail.com',
-    port: Number(process.env.SMTP_PORT ?? 587),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: {
-      user: process.env.SMTP_USER,
-      pass: process.env.SMTP_PASS,
-    },
-  });
+function getResend() {
+  const key = process.env.RESEND_API_KEY;
+  if (!key) throw new Error('RESEND_API_KEY is not set');
+  return new Resend(key);
 }
 
 const FROM = process.env.EMAIL_FROM ?? 'LeaseIQ <noreply@leaseiq.com>';
 
 // ─── Shared layout ────────────────────────────────────────────────────────────
 
-function wrap(body: string): string {
+export function wrap(body: string): string {
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -26,13 +20,13 @@ function wrap(body: string): string {
   <style>
     body { margin: 0; padding: 0; background: #0a0a0f; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; color: #e5e7eb; }
     .container { max-width: 600px; margin: 40px auto; background: #111827; border: 1px solid #1f2937; border-radius: 12px; overflow: hidden; }
-    .header { background: #1d4ed8; padding: 28px 32px; display: flex; align-items: center; gap: 12px; }
+    .header { background: #1d4ed8; padding: 28px 32px; }
     .header h1 { margin: 0; font-size: 22px; font-weight: 700; color: #fff; }
     .body { padding: 32px; }
     .footer { padding: 20px 32px; border-top: 1px solid #1f2937; font-size: 12px; color: #6b7280; text-align: center; }
     h2 { margin: 0 0 16px; font-size: 20px; font-weight: 600; color: #fff; }
     p { margin: 0 0 14px; line-height: 1.6; color: #9ca3af; font-size: 14px; }
-    .btn { display: inline-block; background: #2563eb; color: #fff; font-weight: 600; font-size: 14px; padding: 12px 24px; border-radius: 8px; text-decoration: none; margin: 8px 0 16px; }
+    .btn { display: inline-block; background: #2563eb; color: #fff !important; font-weight: 600; font-size: 14px; padding: 12px 24px; border-radius: 8px; text-decoration: none; margin: 8px 0 16px; }
     .alert-card { background: #1f2937; border-left: 4px solid #ef4444; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
     .alert-card.warning { border-left-color: #f59e0b; }
     .alert-card.info { border-left-color: #3b82f6; }
@@ -58,10 +52,18 @@ function wrap(body: string): string {
 </html>`;
 }
 
-// ─── Welcome email ─────────────────────────────────────────────────────────────
+// ─── Helper ───────────────────────────────────────────────────────────────────
+
+async function send(to: string, subject: string, html: string) {
+  const resend = getResend();
+  const { error } = await resend.emails.send({ from: FROM, to, subject, html });
+  if (error) throw new Error(`Resend error: ${JSON.stringify(error)}`);
+}
+
+// ─── Welcome email ────────────────────────────────────────────────────────────
 
 export async function sendWelcomeEmail(to: string, name: string) {
-  if (!process.env.SMTP_USER) return; // skip if SMTP not configured
+  if (!process.env.RESEND_API_KEY) return;
 
   const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
   const html = wrap(`
@@ -69,22 +71,61 @@ export async function sendWelcomeEmail(to: string, name: string) {
     <p>You're all set. Start by uploading your first lease — our AI will extract all critical terms in under a minute.</p>
     <a href="${baseUrl}/leases/upload" class="btn">Upload your first lease →</a>
     <p>Here's what you can do with LeaseIQ:</p>
-    <div class="checklist-item"><span class="check">✓</span><span><strong>AI extraction</strong> — rent, dates, options, obligations pulled automatically</span></div>
-    <div class="checklist-item"><span class="check">✓</span><span><strong>Deadline alerts</strong> — email reminders before critical dates expire</span></div>
-    <div class="checklist-item"><span class="check">✓</span><span><strong>Portfolio analytics</strong> — full rent roll and exposure in one dashboard</span></div>
+    <div class="checklist-item"><span class="check">✓</span><span><strong style="color:#fff">AI extraction</strong> — rent, dates, options, obligations pulled automatically</span></div>
+    <div class="checklist-item"><span class="check">✓</span><span><strong style="color:#fff">Deadline alerts</strong> — email reminders before critical dates expire</span></div>
+    <div class="checklist-item"><span class="check">✓</span><span><strong style="color:#fff">Portfolio analytics</strong> — full rent roll and exposure in one dashboard</span></div>
     <p style="margin-top:20px;">If you have any questions, just reply to this email.</p>
     <p>— The LeaseIQ Team</p>
   `);
 
-  await createTransport().sendMail({
-    from: FROM,
-    to,
-    subject: 'Welcome to LeaseIQ — Upload your first lease',
-    html,
-  });
+  await send(to, 'Welcome to LeaseIQ — Upload your first lease', html);
 }
 
-// ─── Deadline alert email ──────────────────────────────────────────────────────
+// ─── Password reset email ─────────────────────────────────────────────────────
+
+export async function sendPasswordResetEmail(to: string, name: string, resetUrl: string) {
+  if (!process.env.RESEND_API_KEY) return;
+
+  const html = wrap(`
+    <h2>Reset your password</h2>
+    <p>Hi ${name},</p>
+    <p>We received a request to reset your LeaseIQ password. Click the button below to set a new password. This link expires in <strong style="color:#fff">1 hour</strong>.</p>
+    <a href="${resetUrl}" class="btn">Reset Password →</a>
+    <p>If you didn't request a password reset, you can safely ignore this email. Your password won't change.</p>
+    <div class="alert-card info" style="margin-top:20px;">
+      <span style="font-size:13px;color:#9ca3af;">If the button doesn't work, copy and paste this link into your browser:<br/>
+      <span style="color:#60a5fa;word-break:break-all;">${resetUrl}</span></span>
+    </div>
+    <p style="margin-top:16px;">— The LeaseIQ Team</p>
+  `);
+
+  await send(to, 'Reset your LeaseIQ password', html);
+}
+
+// ─── Team invitation email ────────────────────────────────────────────────────
+
+export async function sendTeamInviteEmail(params: {
+  to: string;
+  inviterName: string;
+  role: string;
+  acceptUrl: string;
+}) {
+  if (!process.env.RESEND_API_KEY) return;
+
+  const html = wrap(`
+    <h2>${params.inviterName} invited you to LeaseIQ</h2>
+    <p>You've been invited to join <strong style="color:#fff">${params.inviterName}'s</strong> LeaseIQ workspace as a <strong style="color:#fff">${params.role}</strong>.</p>
+    <a href="${params.acceptUrl}" class="btn">Accept Invitation →</a>
+    <p>LeaseIQ is a commercial real estate intelligence platform for tracking lease deadlines, rent rolls, and critical dates.</p>
+    <div class="alert-card info" style="margin-top:20px;">
+      <span style="font-size:13px;color:#9ca3af;">This invitation link expires in 7 days. If you didn't expect this, you can safely ignore this email.</span>
+    </div>
+  `);
+
+  await send(params.to, `${params.inviterName} invited you to LeaseIQ`, html);
+}
+
+// ─── Deadline alert email ─────────────────────────────────────────────────────
 
 export async function sendDeadlineAlertEmail(params: {
   to: string;
@@ -98,7 +139,7 @@ export async function sendDeadlineAlertEmail(params: {
     leaseId: string;
   }>;
 }) {
-  if (!process.env.SMTP_USER) return;
+  if (!process.env.RESEND_API_KEY) return;
 
   const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
   const urgency = params.leases.some(l => l.daysRemaining <= 7)
@@ -110,18 +151,16 @@ export async function sendDeadlineAlertEmail(params: {
   const urgencyLabel =
     urgency === 'critical' ? '🚨 Critical' : urgency === 'warning' ? '⚠️ Upcoming' : '📅 Reminder';
 
-  const cards = params.leases
-    .map(l => {
-      const cls = l.daysRemaining <= 7 ? '' : l.daysRemaining <= 30 ? ' warning' : ' info';
-      return `
-      <div class="alert-card${cls}">
-        <strong style="color:#fff">${l.propertyAddress || 'Unknown property'}</strong><br/>
-        <span style="font-size:13px;color:#9ca3af;">Tenant: ${l.tenantName || 'N/A'}</span><br/>
-        <span style="font-size:13px;color:#9ca3af;">Expires: ${l.expirationDate} — <strong style="color:#ef4444">${l.daysRemaining} days remaining</strong></span><br/>
-        <a href="${baseUrl}/leases/${l.leaseId}" style="font-size:12px;color:#60a5fa;">View lease →</a>
-      </div>`;
-    })
-    .join('');
+  const cards = params.leases.map(l => {
+    const cls = l.daysRemaining <= 7 ? '' : l.daysRemaining <= 30 ? ' warning' : ' info';
+    return `
+    <div class="alert-card${cls}">
+      <strong style="color:#fff">${l.propertyAddress || 'Unknown property'}</strong><br/>
+      <span style="font-size:13px;color:#9ca3af;">Tenant: ${l.tenantName || 'N/A'}</span><br/>
+      <span style="font-size:13px;color:#9ca3af;">Expires: ${l.expirationDate} — <strong style="color:#ef4444">${l.daysRemaining} days remaining</strong></span><br/>
+      <a href="${baseUrl}/leases/${l.leaseId}" style="font-size:12px;color:#60a5fa;">View lease →</a>
+    </div>`;
+  }).join('');
 
   const html = wrap(`
     <h2>${urgencyLabel}: Lease deadline${params.leases.length > 1 ? 's' : ''} approaching</h2>
@@ -130,18 +169,17 @@ export async function sendDeadlineAlertEmail(params: {
     <a href="${baseUrl}/alerts" class="btn">View all alerts →</a>
   `);
 
-  await createTransport().sendMail({
-    from: FROM,
-    to: params.to,
-    subject: `${urgencyLabel}: ${params.leases.length} lease deadline${params.leases.length > 1 ? 's' : ''} approaching`,
-    html,
-  });
+  await send(
+    params.to,
+    `${urgencyLabel}: ${params.leases.length} lease deadline${params.leases.length > 1 ? 's' : ''} approaching`,
+    html
+  );
 }
 
-// ─── Promo trial ending email ──────────────────────────────────────────────────
+// ─── Promo trial ending email ─────────────────────────────────────────────────
 
 export async function sendPromoTrialEndingEmail(to: string, name: string, daysLeft: number, trialEnd: string) {
-  if (!process.env.SMTP_USER) return;
+  if (!process.env.RESEND_API_KEY) return;
 
   const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
   const html = wrap(`
@@ -158,15 +196,10 @@ export async function sendPromoTrialEndingEmail(to: string, name: string, daysLe
     <p>— The LeaseIQ Team</p>
   `);
 
-  await createTransport().sendMail({
-    from: FROM,
-    to,
-    subject: `Your LeaseIQ Professional trial ends in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
-    html,
-  });
+  await send(to, `Your LeaseIQ Professional trial ends in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`, html);
 }
 
-// ─── Weekly portfolio summary ──────────────────────────────────────────────────
+// ─── Weekly portfolio digest ──────────────────────────────────────────────────
 
 export async function sendWeeklyDigestEmail(params: {
   to: string;
@@ -177,20 +210,17 @@ export async function sendWeeklyDigestEmail(params: {
   criticalAlerts: number;
   topLeases: Array<{ propertyAddress: string; expirationDate: string; monthlyRent: number }>;
 }) {
-  if (!process.env.SMTP_USER) return;
+  if (!process.env.RESEND_API_KEY) return;
 
   const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
   const fmt = (n: number) => '$' + n.toLocaleString('en-US', { maximumFractionDigits: 0 });
 
-  const topRows = params.topLeases
-    .map(
-      l => `<tr>
-        <td style="padding:8px;color:#e5e7eb;font-size:13px;">${l.propertyAddress || '—'}</td>
-        <td style="padding:8px;color:#9ca3af;font-size:13px;">${l.expirationDate || '—'}</td>
-        <td style="padding:8px;color:#9ca3af;font-size:13px;">${l.monthlyRent ? fmt(l.monthlyRent) : '—'}</td>
-      </tr>`
-    )
-    .join('');
+  const topRows = params.topLeases.map(l => `
+    <tr>
+      <td style="padding:8px;color:#e5e7eb;font-size:13px;">${l.propertyAddress || '—'}</td>
+      <td style="padding:8px;color:#9ca3af;font-size:13px;">${l.expirationDate || '—'}</td>
+      <td style="padding:8px;color:#9ca3af;font-size:13px;">${l.monthlyRent ? fmt(l.monthlyRent) : '—'}</td>
+    </tr>`).join('');
 
   const html = wrap(`
     <h2>Your weekly portfolio summary</h2>
@@ -201,9 +231,8 @@ export async function sendWeeklyDigestEmail(params: {
       <div class="stat"><div class="stat-val">${params.expiringIn90Days}</div><div class="stat-label">Expiring in 90d</div></div>
       <div class="stat"><div class="stat-val" style="color:${params.criticalAlerts > 0 ? '#ef4444' : '#10b981'}">${params.criticalAlerts}</div><div class="stat-label">Critical Alerts</div></div>
     </div>
-    ${
-      params.topLeases.length > 0
-        ? `<p><strong style="color:#fff">Leases expiring soonest:</strong></p>
+    ${params.topLeases.length > 0 ? `
+      <p><strong style="color:#fff">Leases expiring soonest:</strong></p>
       <table width="100%" style="border-collapse:collapse;margin-bottom:16px;">
         <thead>
           <tr style="border-bottom:1px solid #1f2937;">
@@ -213,16 +242,13 @@ export async function sendWeeklyDigestEmail(params: {
           </tr>
         </thead>
         <tbody>${topRows}</tbody>
-      </table>`
-        : ''
-    }
+      </table>` : ''}
     <a href="${baseUrl}/dashboard" class="btn">View full dashboard →</a>
   `);
 
-  await createTransport().sendMail({
-    from: FROM,
-    to: params.to,
-    subject: `LeaseIQ weekly digest — ${params.totalLeases} leases, ${fmt(params.monthlyRent)}/mo`,
-    html,
-  });
+  await send(
+    params.to,
+    `LeaseIQ weekly digest — ${params.totalLeases} leases, ${fmt(params.monthlyRent)}/mo`,
+    html
+  );
 }

@@ -205,6 +205,22 @@ export async function GET(req: NextRequest) {
     step = 'migrate marketPosition column';
     await sql`ALTER TABLE leases ADD COLUMN IF NOT EXISTS "marketPosition" TEXT`;
 
+    // ── password_resets ───────────────────────────────────────────────────────
+    step = 'create password_resets table';
+    await sql`
+      CREATE TABLE IF NOT EXISTS password_resets (
+        id TEXT PRIMARY KEY,
+        "userId" TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token TEXT NOT NULL UNIQUE,
+        "expiresAt" TIMESTAMPTZ NOT NULL,
+        "usedAt" TIMESTAMPTZ,
+        "createdAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `;
+
+    step = 'create password_resets index';
+    await sql`CREATE INDEX IF NOT EXISTS idx_password_resets_userId ON password_resets("userId")`;
+
     // Seed the Mustanges2028 promo code if not already present
     step = 'seed promo code';
     await sql`
