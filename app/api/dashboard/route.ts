@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   if (!session?.user?.email) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
   const db = getDb();
-  const user = db.prepare('SELECT id FROM users WHERE email = ?').get(session.user.email) as any;
+  const user = db.prepare('SELECT id, plan, promoCode, promoTrialEnd FROM users WHERE email = ?').get(session.user.email) as any;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
   const leases = db.prepare("SELECT * FROM leases WHERE userId = ? AND status = 'completed'").all(user.id) as any[];
@@ -51,6 +51,18 @@ export async function GET(req: NextRequest) {
     ORDER BY uploadedAt DESC LIMIT 5
   `).all(user.id) as any[];
 
+  // Promo trial info
+  let promoTrial: { active: boolean; daysLeft: number; trialEnd: string } | null = null;
+  if (user.promoCode && user.promoTrialEnd) {
+    const trialEndDate = new Date(user.promoTrialEnd);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const daysLeft = Math.ceil((trialEndDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    if (daysLeft > 0) {
+      promoTrial = { active: true, daysLeft, trialEnd: user.promoTrialEnd };
+    }
+  }
+
   return NextResponse.json({
     totalLeases,
     totalMonthlyRent,
@@ -58,5 +70,6 @@ export async function GET(req: NextRequest) {
     expiringThisYear,
     urgentAlerts,
     recentLeases,
+    promoTrial,
   });
 }

@@ -138,6 +138,34 @@ export async function sendDeadlineAlertEmail(params: {
   });
 }
 
+// ─── Promo trial ending email ──────────────────────────────────────────────────
+
+export async function sendPromoTrialEndingEmail(to: string, name: string, daysLeft: number, trialEnd: string) {
+  if (!process.env.SMTP_USER) return;
+
+  const baseUrl = process.env.NEXTAUTH_URL ?? 'http://localhost:3000';
+  const html = wrap(`
+    <h2>Your free Professional trial ends in ${daysLeft} day${daysLeft === 1 ? '' : 's'}</h2>
+    <p>Hi ${name},</p>
+    <p>Your free promotional trial of the LeaseIQ <strong style="color:#fff">Professional plan</strong> ends on <strong style="color:#fff">${new Date(trialEnd).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}</strong>.</p>
+    <p>After your trial ends, your account will be moved to the Free plan unless you add a payment method to continue.</p>
+    <div class="alert-card warning" style="margin:24px 0;">
+      <strong style="color:#fff">What happens after your trial:</strong><br/>
+      <span style="font-size:13px;color:#9ca3af;">Without a payment method, you will lose access to unlimited lease uploads, AI Analyst, Bulk Upload, and Team Collaboration features.</span>
+    </div>
+    <a href="${baseUrl}/settings" class="btn">Add Payment Method →</a>
+    <p>If you have any questions, reply to this email and we will help.</p>
+    <p>— The LeaseIQ Team</p>
+  `);
+
+  await createTransport().sendMail({
+    from: FROM,
+    to,
+    subject: `Your LeaseIQ Professional trial ends in ${daysLeft} day${daysLeft === 1 ? '' : 's'}`,
+    html,
+  });
+}
+
 // ─── Weekly portfolio summary ──────────────────────────────────────────────────
 
 export async function sendWeeklyDigestEmail(params: {

@@ -10,6 +10,7 @@ function SignInForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const justRegistered = searchParams.get('registered') === 'true';
+  const promoApplied = searchParams.get('promo') === 'true';
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -53,10 +54,19 @@ function SignInForm() {
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-8">
           <h2 className="text-xl font-semibold text-white mb-6">Sign in to your account</h2>
 
-          {justRegistered && (
+          {justRegistered && !promoApplied && (
             <div className="bg-green-900/20 border border-green-800 text-green-400 rounded-lg p-3 mb-4 text-sm flex items-center gap-2">
               <CheckCircle className="h-4 w-4 flex-shrink-0" />
               Account created successfully! Sign in below.
+            </div>
+          )}
+          {promoApplied && (
+            <div className="bg-purple-900/20 border border-purple-700 text-purple-300 rounded-lg p-3 mb-4 text-sm">
+              <div className="flex items-center gap-2 font-semibold mb-1">
+                <CheckCircle className="h-4 w-4 flex-shrink-0 text-purple-400" />
+                Promo code applied!
+              </div>
+              You get 1 month of the Professional plan free. Sign in to get started.
             </div>
           )}
 

@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { signOut } from 'next-auth/react';
-import { User, Key, Trash2, Loader2, CheckCircle, AlertCircle, LogOut } from 'lucide-react';
+import { User, Key, Trash2, Loader2, CheckCircle, AlertCircle, LogOut, Tag } from 'lucide-react';
 
 export default function SettingsPage() {
   const [user, setUser] = useState<any>(null);
@@ -14,6 +14,7 @@ export default function SettingsPage() {
   const [savingProfile, setSavingProfile] = useState(false);
   const [savingPassword, setSavingPassword] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
+  const [promoAdmin, setPromoAdmin] = useState<any>(null);
 
   useEffect(() => {
     fetch('/api/settings').then(r => r.json()).then(d => {
@@ -21,6 +22,10 @@ export default function SettingsPage() {
       setName(d.user?.name || '');
       setEmail(d.user?.email || '');
     });
+    // Try loading promo admin data (only works for admin email)
+    fetch('/api/admin/promo').then(r => r.ok ? r.json() : null).then(d => {
+      if (d) setPromoAdmin(d);
+    }).catch(() => {});
   }, []);
 
   const saveProfile = async (e: React.FormEvent) => {
@@ -154,6 +159,50 @@ export default function SettingsPage() {
           <Msg msg={passwordMsg} />
         </form>
       </div>
+
+      {/* Promo Code Admin — only visible when ADMIN_EMAIL matches */}
+      {promoAdmin && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6 mb-6">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="bg-purple-900/30 p-2 rounded-lg"><Tag className="h-5 w-5 text-purple-400" /></div>
+            <h2 className="text-base font-semibold text-white">Promo Code Admin</h2>
+          </div>
+
+          {promoAdmin.codes?.map((code: any) => (
+            <div key={code.id} className="mb-6">
+              <div className="flex items-center gap-3 mb-3">
+                <span className="text-white font-mono font-semibold uppercase text-sm bg-gray-800 border border-gray-700 px-3 py-1 rounded-lg">
+                  {code.code}
+                </span>
+                <span className="text-xs text-purple-400 bg-purple-900/20 border border-purple-700 px-2 py-0.5 rounded-full capitalize">
+                  {code.plan}
+                </span>
+                <span className={`text-xs px-2 py-0.5 rounded-full border ${code.is_active ? 'text-green-400 border-green-700 bg-green-900/20' : 'text-gray-400 border-gray-700 bg-gray-800'}`}>
+                  {code.is_active ? 'Active' : 'Inactive'}
+                </span>
+                <span className="text-gray-400 text-sm ml-auto">{code.use_count} use{code.use_count !== 1 ? 's' : ''}</span>
+              </div>
+
+              {promoAdmin.uses?.filter((u: any) => u.code === code.code).length > 0 ? (
+                <div className="space-y-2">
+                  {promoAdmin.uses.filter((u: any) => u.code === code.code).map((use: any) => (
+                    <div key={use.id} className="flex items-center gap-3 p-3 bg-gray-800/50 rounded-lg border border-gray-700 text-sm">
+                      <div className="h-2 w-2 rounded-full bg-purple-400 flex-shrink-0" />
+                      <span className="text-white font-medium">{use.user_name}</span>
+                      <span className="text-gray-400">{use.user_email}</span>
+                      <span className="text-gray-500 ml-auto text-xs">
+                        {new Date(use.used_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-gray-500 text-sm">No uses yet.</p>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Danger Zone */}
       <div className="bg-gray-900 border border-red-900/50 rounded-xl p-6">

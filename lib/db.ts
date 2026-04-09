@@ -89,6 +89,27 @@ function initializeSchema(db: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_alerts_leaseId ON alerts(leaseId);
     CREATE INDEX IF NOT EXISTS idx_lease_versions_leaseId ON lease_versions(leaseId);
     CREATE INDEX IF NOT EXISTS idx_team_members_accountId ON team_members(accountId);
+
+    CREATE TABLE IF NOT EXISTS promo_codes (
+      id TEXT PRIMARY KEY,
+      code TEXT UNIQUE NOT NULL,
+      discount_type TEXT NOT NULL DEFAULT 'free_month',
+      plan TEXT NOT NULL DEFAULT 'professional',
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS promo_code_uses (
+      id TEXT PRIMARY KEY,
+      promo_code_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      used_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (promo_code_id) REFERENCES promo_codes(id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_promo_uses_user ON promo_code_uses(user_id);
+    CREATE INDEX IF NOT EXISTS idx_promo_uses_code ON promo_code_uses(promo_code_id);
   `);
 
   // Migrate existing users table — add new columns if they don't exist
@@ -104,6 +125,20 @@ function initializeSchema(db: Database.Database) {
   if (!leaseCols.includes('riskScore')) db.exec('ALTER TABLE leases ADD COLUMN riskScore INTEGER');
   if (!leaseCols.includes('riskFactors')) db.exec('ALTER TABLE leases ADD COLUMN riskFactors TEXT');
   if (!leaseCols.includes('aiAnalysis')) db.exec('ALTER TABLE leases ADD COLUMN aiAnalysis TEXT');
+
+  // Migrate users table — add promo columns
+  const userCols2 = (db.prepare("PRAGMA table_info(users)").all() as { name: string }[]).map(c => c.name);
+  if (!userCols2.includes('promoCode')) db.exec("ALTER TABLE users ADD COLUMN promoCode TEXT");
+  if (!userCols2.includes('promoTrialEnd')) db.exec("ALTER TABLE users ADD COLUMN promoTrialEnd TEXT");
+
+  // Seed promo codes
+  const existing = db.prepare("SELECT id FROM promo_codes WHERE code = 'mustanges2028'").get();
+  if (!existing) {
+    const { v4: uuidv4 } = require('uuid');
+    db.prepare(
+      "INSERT INTO promo_codes (id, code, discount_type, plan, is_active) VALUES (?, 'mustanges2028', 'free_month', 'professional', 1)"
+    ).run(uuidv4());
+  }
 }
 
 export default getDb;

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   FileText, DollarSign, AlertTriangle, Clock, Upload,
-  Bell, ChevronRight, Building2, Loader2, RefreshCw
+  Bell, ChevronRight, Building2, Loader2, RefreshCw, Sparkles, CreditCard
 } from 'lucide-react';
 import { formatCurrency, formatDate, getDaysUntil, getUrgencyColor } from '@/lib/dateUtils';
 import OnboardingChecklist from '@/components/ui/OnboardingChecklist';
@@ -15,6 +15,7 @@ interface DashboardData {
   expiringThisYear: number;
   urgentAlerts: any[];
   recentLeases: any[];
+  promoTrial: { active: boolean; daysLeft: number; trialEnd: string } | null;
 }
 
 export default function Dashboard() {
@@ -88,6 +89,30 @@ export default function Dashboard() {
   return (
     <div className="p-8">
       <OnboardingChecklist />
+
+      {/* Promo trial banner */}
+      {data?.promoTrial?.active && (
+        <div className="mb-6 bg-gradient-to-r from-purple-900/40 to-blue-900/40 border border-purple-700/60 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex items-start gap-3 flex-1">
+            <div className="bg-purple-600/20 border border-purple-600/40 p-2 rounded-lg flex-shrink-0">
+              <Sparkles className="h-5 w-5 text-purple-400" />
+            </div>
+            <div>
+              <p className="text-white font-semibold text-sm">You are on a free promotional trial of the Professional plan</p>
+              <p className="text-purple-300 text-sm mt-0.5">
+                {data.promoTrial.daysLeft} {data.promoTrial.daysLeft === 1 ? 'day' : 'days'} remaining — trial ends on {new Date(data.promoTrial.trialEnd).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })}
+              </p>
+            </div>
+          </div>
+          <a
+            href="/settings"
+            className="flex items-center gap-2 bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors flex-shrink-0"
+          >
+            <CreditCard className="h-4 w-4" />
+            Add Payment Method
+          </a>
+        </div>
+      )}
       <div className="mb-8 flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold text-white">Portfolio Dashboard</h1>
