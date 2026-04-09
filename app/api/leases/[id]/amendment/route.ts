@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { v4 as uuidv4 } from 'uuid';
-import path from 'path';
-import fs from 'fs';
 import getDb from '@/lib/db';
 import { parsePdf } from '@/lib/pdfParser';
 import { calculateRiskScore } from '@/lib/riskScore';
 import Anthropic from '@anthropic-ai/sdk';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession();
@@ -29,17 +26,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const file = formData.get('file') as File | null;
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
-  if (!fs.existsSync(UPLOADS_DIR)) fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-  const tmpName = `amendment-${uuidv4()}.pdf`;
-  const tmpPath = path.join(UPLOADS_DIR, tmpName);
-  fs.writeFileSync(tmpPath, Buffer.from(await file.arrayBuffer()));
-
-  let amendmentText = '';
-  try {
-    amendmentText = await parsePdf(tmpPath);
-  } finally {
-    fs.unlinkSync(tmpPath);
-  }
+  // Parse PDF directly from in-memory buffer — no temp file needed
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const amendmentText = await parsePdf(buffer);
 
   const currentData = lease.extractedData ? JSON.parse(lease.extractedData) : {};
 

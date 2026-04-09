@@ -3,8 +3,6 @@ import { getServerSession } from 'next-auth';
 import getDb from '@/lib/db';
 import { parsePdf } from '@/lib/pdfParser';
 import Anthropic from '@anthropic-ai/sdk';
-import path from 'path';
-import fs from 'fs';
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -53,18 +51,9 @@ export async function POST(req: NextRequest) {
 
   const leaseData = lease.extractedData ? JSON.parse(lease.extractedData) : {};
 
-  // Parse the CAM statement PDF
-  const tmpDir = path.join(process.cwd(), 'uploads', 'tmp');
-  if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-  const tmpPath = path.join(tmpDir, `cam-${Date.now()}.pdf`);
-  fs.writeFileSync(tmpPath, Buffer.from(await camFile.arrayBuffer()));
-
-  let camText = '';
-  try {
-    camText = await parsePdf(tmpPath);
-  } finally {
-    fs.unlinkSync(tmpPath);
-  }
+  // Parse CAM statement PDF directly from in-memory buffer — no temp file needed
+  const camBuffer = Buffer.from(await camFile.arrayBuffer());
+  const camText = await parsePdf(camBuffer);
 
   const leaseText = lease.originalText || JSON.stringify(leaseData);
 

@@ -1,12 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
-import path from 'path';
-import fs from 'fs';
+import { v4 as uuidv4 } from 'uuid';
 import getDb from '@/lib/db';
 import { parsePdf } from '@/lib/pdfParser';
 import { extractLeaseData } from '@/lib/claude';
 import { generateAlertDates } from '@/lib/dateUtils';
-import { v4 as uuidv4 } from 'uuid';
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const session = await getServerSession();
@@ -22,20 +20,16 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   const lease = leaseRows[0] as any;
   if (!lease) return NextResponse.json({ error: 'Lease not found' }, { status: 404 });
 
-  // Find the uploaded file
-  const uploadsDir = path.join(process.cwd(), 'uploads');
-  const files = fs.existsSync(uploadsDir)
-    ? fs.readdirSync(uploadsDir).filter((f: string) => f.startsWith(id))
-    : [];
-  if (!files.length) return NextResponse.json({ error: 'Original file not found' }, { status: 404 });
-
-  const filePath = path.join(uploadsDir, files[0]);
+  if (!lease.blobUrl) {
+    return NextResponse.json({ error: 'No file stored for this lease. The original upload may predate blob storage.' }, { status: 404 });
+  }
 
   await sql`UPDATE leases SET status = 'processing' WHERE id = ${id}`;
   await sql`DELETE FROM alerts WHERE "leaseId" = ${id}`;
 
   try {
-    const text = await parsePdf(filePath);
+    // Fetch PDF from Vercel Blob by URL — no local filesystem needed
+    const text = await parsePdf(lease.blobUrl);
     const extracted = await extractLeaseData(text);
 
     await sql`

@@ -1,15 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { v4 as uuidv4 } from 'uuid';
-import path from 'path';
-import fs from 'fs';
+import { put } from '@vercel/blob';
 import getDb from '@/lib/db';
 import { parsePdf } from '@/lib/pdfParser';
 import { extractLeaseData } from '@/lib/claude';
 import { generateAlertDates } from '@/lib/dateUtils';
 import { calculateRiskScore } from '@/lib/riskScore';
-
-const UPLOADS_DIR = path.join(process.cwd(), 'uploads');
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession();
@@ -20,10 +17,6 @@ export async function POST(req: NextRequest) {
   const user = userRows[0] as any;
   if (!user) return NextResponse.json({ error: 'User not found' }, { status: 404 });
 
-  if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
-  }
-
   const formData = await req.formData();
   const file = formData.get('file') as File;
 
@@ -32,33 +25,39 @@ export async function POST(req: NextRequest) {
   if (file.size > 50 * 1024 * 1024) return NextResponse.json({ error: 'File too large (max 50MB)' }, { status: 400 });
 
   const leaseId = uuidv4();
-  const fileName = `${leaseId}-${file.name.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
-  const filePath = path.join(UPLOADS_DIR, fileName);
+  const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+  const blobPath = `leases/${leaseId}/${safeName}`;
 
-  // Save file
+  // Read bytes once — reuse for both blob upload and PDF parsing
   const bytes = await file.arrayBuffer();
-  fs.writeFileSync(filePath, Buffer.from(bytes));
+  const buffer = Buffer.from(bytes);
 
-  // Create lease record
+  // Upload to Vercel Blob (persistent, CDN-backed storage)
+  const blob = await put(blobPath, buffer, {
+    access: 'public',
+    contentType: 'application/pdf',
+  });
+
+  // Create lease record with blob URL
   await sql`
-    INSERT INTO leases (id, "userId", "fileName", "fileSize", status)
-    VALUES (${leaseId}, ${user.id}, ${file.name}, ${file.size}, 'processing')
+    INSERT INTO leases (id, "userId", "fileName", "fileSize", status, "blobUrl")
+    VALUES (${leaseId}, ${user.id}, ${file.name}, ${file.size}, 'processing', ${blob.url})
   `;
 
-  // Process async (fire-and-forget)
-  processLease(leaseId, filePath, user.id).catch(async err => {
+  // Process async (fire-and-forget) — pass buffer so no re-download needed
+  processLease(leaseId, buffer, user.id).catch(async err => {
     console.error('Lease processing error:', err);
     const s = getDb();
     await s`UPDATE leases SET status = 'error' WHERE id = ${leaseId}`.catch(() => {});
   });
 
-  return NextResponse.json({ leaseId, status: 'processing' });
+  return NextResponse.json({ leaseId, status: 'processing', blobUrl: blob.url });
 }
 
-async function processLease(leaseId: string, filePath: string, userId: string) {
+async function processLease(leaseId: string, buffer: Buffer, userId: string) {
   const sql = getDb();
   try {
-    const text = await parsePdf(filePath);
+    const text = await parsePdf(buffer);
     const extracted = await extractLeaseData(text);
     const risk = calculateRiskScore(extracted);
 

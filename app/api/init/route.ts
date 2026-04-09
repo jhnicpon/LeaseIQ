@@ -88,9 +88,14 @@ export async function GET(req: NextRequest) {
         "monthlyRent" REAL,
         "riskScore" INTEGER,
         "riskFactors" TEXT,
-        "aiAnalysis" TEXT
+        "aiAnalysis" TEXT,
+        "blobUrl" TEXT
       )
     `;
+
+    // Add blobUrl to existing tables that predate this column
+    step = 'migrate blobUrl column';
+    await sql`ALTER TABLE leases ADD COLUMN IF NOT EXISTS "blobUrl" TEXT`;
 
     step = 'create leases index';
     await sql`CREATE INDEX IF NOT EXISTS idx_leases_userId ON leases("userId")`;
