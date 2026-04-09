@@ -2,8 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { v4 as uuidv4 } from 'uuid';
 import getDb from '@/lib/db';
-import { parsePdf } from '@/lib/pdfParser';
-import { extractLeaseData } from '@/lib/claude';
+import { parseFileFromUrl } from '@/lib/fileParser';
+import { extractLeaseDataFromContent } from '@/lib/claude';
 import { generateAlertDates } from '@/lib/dateUtils';
 
 export async function POST(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -28,16 +28,17 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
   await sql`DELETE FROM alerts WHERE "leaseId" = ${id}`;
 
   try {
-    // Fetch PDF from Vercel Blob by URL — no local filesystem needed
-    const text = await parsePdf(lease.blobUrl);
-    const extracted = await extractLeaseData(text);
+    const parsed = await parseFileFromUrl(lease.blobUrl, lease.fileName);
+    const extracted = await extractLeaseDataFromContent(parsed);
+
+    const originalText = parsed.type === 'text' ? parsed.text.substring(0, 100000) : '';
 
     await sql`
       UPDATE leases SET
         status = 'completed',
         "processedAt" = NOW(),
         "extractedData" = ${JSON.stringify(extracted)},
-        "originalText" = ${text.substring(0, 100000)},
+        "originalText" = ${originalText},
         "propertyAddress" = ${extracted.propertyAddress},
         "tenantName" = ${extracted.tenantName},
         "expirationDate" = ${extracted.leaseExpirationDate},

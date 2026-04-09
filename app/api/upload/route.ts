@@ -3,10 +3,13 @@ import { getServerSession } from 'next-auth';
 import { v4 as uuidv4 } from 'uuid';
 import { put } from '@vercel/blob';
 import getDb from '@/lib/db';
-import { parsePdf } from '@/lib/pdfParser';
-import { extractLeaseData } from '@/lib/claude';
+import { parseFile, SUPPORTED_EXTENSIONS } from '@/lib/fileParser';
+import { extractLeaseDataFromContent } from '@/lib/claude';
 import { generateAlertDates } from '@/lib/dateUtils';
 import { calculateRiskScore } from '@/lib/riskScore';
+import {
+  normalizeAddress, extractCity, extractState, findMatchingProperty,
+} from '@/lib/propertyMatcher';
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession();
@@ -21,31 +24,48 @@ export async function POST(req: NextRequest) {
   const file = formData.get('file') as File;
 
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
-  if (!file.name.toLowerCase().endsWith('.pdf')) return NextResponse.json({ error: 'Only PDF files are supported' }, { status: 400 });
+
+  const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+  if (!SUPPORTED_EXTENSIONS.includes(ext)) {
+    return NextResponse.json(
+      { error: `Unsupported file type .${ext}. Supported: ${SUPPORTED_EXTENSIONS.join(', ')}` },
+      { status: 400 },
+    );
+  }
   if (file.size > 50 * 1024 * 1024) return NextResponse.json({ error: 'File too large (max 50MB)' }, { status: 400 });
 
   const leaseId = uuidv4();
   const safeName = file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
   const blobPath = `leases/${leaseId}/${safeName}`;
 
-  // Read bytes once — reuse for both blob upload and PDF parsing
   const bytes = await file.arrayBuffer();
   const buffer = Buffer.from(bytes);
 
-  // Upload to Vercel Blob (persistent, CDN-backed storage)
+  // Determine content type for blob storage
+  const contentTypeMap: Record<string, string> = {
+    pdf: 'application/pdf',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    xls: 'application/vnd.ms-excel',
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    gif: 'image/gif',
+  };
+
   const blob = await put(blobPath, buffer, {
     access: 'private',
-    contentType: 'application/pdf',
+    contentType: contentTypeMap[ext] ?? 'application/octet-stream',
   });
 
-  // Create lease record with blob URL
   await sql`
     INSERT INTO leases (id, "userId", "fileName", "fileSize", status, "blobUrl")
     VALUES (${leaseId}, ${user.id}, ${file.name}, ${file.size}, 'processing', ${blob.url})
   `;
 
-  // Process async (fire-and-forget) — pass buffer so no re-download needed
-  processLease(leaseId, buffer, user.id).catch(async err => {
+  // Fire-and-forget processing (non-streaming path — kept for reprocess compatibility)
+  processLease(leaseId, buffer, file.name, user.id).catch(async err => {
     console.error('Lease processing error:', err);
     const s = getDb();
     await s`UPDATE leases SET status = 'error' WHERE id = ${leaseId}`.catch(() => {});
@@ -54,35 +74,66 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({ leaseId, status: 'processing', blobUrl: blob.url });
 }
 
-async function processLease(leaseId: string, buffer: Buffer, userId: string) {
+async function processLease(leaseId: string, buffer: Buffer, fileName: string, userId: string) {
   const sql = getDb();
   try {
-    const text = await parsePdf(buffer);
-    const extracted = await extractLeaseData(text);
+    const parsed = await parseFile(buffer, fileName);
+    const extracted = await extractLeaseDataFromContent(parsed);
     const risk = calculateRiskScore(extracted);
+
+    // For image leases we don't store originalText (it's an image, not text)
+    const originalText = parsed.type === 'text' ? parsed.text.substring(0, 100000) : '';
+
+    // ── Auto-group into a property ─────────────────────────────────────────────
+    let propertyId: string | null = null;
+    if (extracted.propertyAddress) {
+      const normAddr = normalizeAddress(extracted.propertyAddress);
+      const existingProps = await sql`
+        SELECT id, normalized_address FROM properties WHERE user_id = ${userId}
+      ` as { id: string; normalized_address: string }[];
+
+      propertyId = findMatchingProperty(normAddr, existingProps);
+
+      if (!propertyId) {
+        // Create a new property record (DB generates UUID)
+        const newProp = await sql`
+          INSERT INTO properties (user_id, name, address, normalized_address, city, state, property_type)
+          VALUES (
+            ${userId},
+            ${extracted.propertyAddress},
+            ${extracted.propertyAddress},
+            ${normAddr},
+            ${extractCity(extracted.propertyAddress)},
+            ${extractState(extracted.propertyAddress)},
+            ${extracted.propertyType || null}
+          )
+          RETURNING id
+        `;
+        propertyId = newProp[0].id;
+      }
+    }
 
     await sql`
       UPDATE leases SET
         status = 'completed',
         "processedAt" = NOW(),
         "extractedData" = ${JSON.stringify(extracted)},
-        "originalText" = ${text.substring(0, 100000)},
+        "originalText" = ${originalText},
         "propertyAddress" = ${extracted.propertyAddress},
         "tenantName" = ${extracted.tenantName},
         "expirationDate" = ${extracted.leaseExpirationDate},
         "monthlyRent" = ${extracted.baseRentMonthly},
         "riskScore" = ${risk.score},
-        "riskFactors" = ${JSON.stringify(risk.factors)}
+        "riskFactors" = ${JSON.stringify(risk.factors)},
+        property_id = ${propertyId}
       WHERE id = ${leaseId}
     `;
 
-    // Create version 1
     await sql`
       INSERT INTO lease_versions (id, "leaseId", "userId", version, "extractedData", "changeDescription", "changedBy")
       VALUES (${uuidv4()}, ${leaseId}, ${userId}, ${1}, ${JSON.stringify(extracted)}, ${'Initial extraction'}, ${'AI'})
     `;
 
-    // Generate alerts for critical dates
     const criticalDates = [
       { date: extracted.leaseExpirationDate, type: 'Lease Expiration' },
       { date: extracted.renewalOptionDeadline, type: 'Renewal Option Deadline' },

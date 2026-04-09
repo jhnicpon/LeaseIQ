@@ -6,13 +6,14 @@ import { signOut } from 'next-auth/react';
 import {
   Building2, LayoutDashboard, FileText, Calendar, Bell,
   BarChart3, GitCompare, Search, Settings, LogOut, Users,
-  Calculator, Menu, X
+  Calculator, Menu, X, Layers,
 } from 'lucide-react';
 
 const navItems = [
   { href: '/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
   { href: '/portfolio', icon: BarChart3, label: 'Portfolio' },
   { href: '/leases', icon: FileText, label: 'Leases' },
+  { href: '/properties', icon: Layers, label: 'Properties' },
   { href: '/calendar', icon: Calendar, label: 'Calendar' },
   { href: '/alerts', icon: Bell, label: 'Alerts' },
   { href: '/compare', icon: GitCompare, label: 'Compare' },
@@ -48,7 +49,8 @@ function SidebarContent({ onClose }: { onClose?: () => void }) {
         {navItems.map(({ href, icon: Icon, label }) => {
           const isActive = pathname === href
             || (href === '/leases' && (pathname === '/leases' || pathname.startsWith('/leases/')))
-            || (href !== '/leases' && href !== '/dashboard' && pathname.startsWith(href + '/'))
+            || (href === '/properties' && (pathname === '/properties' || pathname.startsWith('/properties/')))
+            || (href !== '/leases' && href !== '/properties' && href !== '/dashboard' && pathname.startsWith(href + '/'))
             || (href === '/dashboard' && pathname === '/dashboard');
           return (
             <Link

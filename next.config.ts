@@ -9,7 +9,7 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ['pdf-parse', 'nodemailer'],
+  serverExternalPackages: ['pdf-parse', 'nodemailer', 'mammoth', 'xlsx'],
   async headers() {
     return [
       {

@@ -221,7 +221,34 @@ export async function GET(req: NextRequest) {
     step = 'create password_resets index';
     await sql`CREATE INDEX IF NOT EXISTS idx_password_resets_userId ON password_resets("userId")`;
 
-    // Seed the Mustanges2028 promo code if not already present
+    // ── properties ────────────────────────────────────────────────────────────
+    step = 'create properties table';
+    await sql`
+      CREATE TABLE IF NOT EXISTS properties (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        address TEXT NOT NULL,
+        normalized_address TEXT NOT NULL,
+        city TEXT,
+        state TEXT,
+        zip TEXT,
+        property_type TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      )
+    `;
+
+    step = 'create properties indexes';
+    await sql`CREATE INDEX IF NOT EXISTS idx_properties_user_id ON properties(user_id)`;
+
+    step = 'migrate property_id column on leases';
+    await sql`ALTER TABLE leases ADD COLUMN IF NOT EXISTS property_id UUID REFERENCES properties(id) ON DELETE SET NULL`;
+
+    step = 'create leases property_id index';
+    await sql`CREATE INDEX IF NOT EXISTS idx_leases_property_id ON leases(property_id)`;
+
+    // ── Seed the Mustanges2028 promo code if not already present
     step = 'seed promo code';
     await sql`
       INSERT INTO promo_codes (id, code, discount_type, plan, is_active)

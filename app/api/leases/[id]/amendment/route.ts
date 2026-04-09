@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { v4 as uuidv4 } from 'uuid';
 import getDb from '@/lib/db';
-import { parsePdf } from '@/lib/pdfParser';
+import { parseFile } from '@/lib/fileParser';
 import { calculateRiskScore } from '@/lib/riskScore';
 import Anthropic from '@anthropic-ai/sdk';
 
@@ -26,9 +26,29 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const file = formData.get('file') as File | null;
   if (!file) return NextResponse.json({ error: 'No file provided' }, { status: 400 });
 
-  // Parse PDF directly from in-memory buffer — no temp file needed
   const buffer = Buffer.from(await file.arrayBuffer());
-  const amendmentText = await parsePdf(buffer);
+  const parsed = await parseFile(buffer, file.name);
+
+  // For amendments, we need text content — images are supported via OCR description
+  let amendmentText: string;
+  if (parsed.type === 'text') {
+    amendmentText = parsed.text.substring(0, 50000);
+  } else {
+    // Ask Claude to describe the image content for amendment extraction
+    const visionMsg = await client.messages.create({
+      model: 'claude-sonnet-4-6',
+      max_tokens: 2048,
+      messages: [{
+        role: 'user',
+        content: [
+          { type: 'image', source: { type: 'base64', media_type: parsed.mediaType, data: parsed.base64 } },
+          { type: 'text', text: 'Transcribe all text from this lease amendment image verbatim.' },
+        ],
+      }],
+    });
+    const visionContent = visionMsg.content[0];
+    amendmentText = visionContent.type === 'text' ? visionContent.text : '';
+  }
 
   const currentData = lease.extractedData ? JSON.parse(lease.extractedData) : {};
 
@@ -38,7 +58,7 @@ CURRENT LEASE DATA:
 ${JSON.stringify(currentData, null, 2)}
 
 AMENDMENT TEXT:
-${amendmentText.substring(0, 50000)}
+${amendmentText}
 
 Return ONLY a JSON object with the changed fields. Example: {"baseRentMonthly": 8500, "renewalOptions": "Updated: two additional 5-year options"}`;
 
@@ -57,7 +77,6 @@ Return ONLY a JSON object with the changed fields. Example: {"baseRentMonthly": 
   const changes = JSON.parse(jsonMatch[0]);
   const changedFields = Object.keys(changes);
 
-  // Save current as a version before applying amendment
   const maxVRows = await sql`SELECT MAX(version) as v FROM lease_versions WHERE "leaseId" = ${id}`;
   const maxVersion = (maxVRows[0] as any)?.v ?? 0;
 
