@@ -137,6 +137,9 @@ export async function GET(req: NextRequest) {
     step = 'create lease_versions index';
     await sql`CREATE INDEX IF NOT EXISTS idx_lease_versions_leaseId ON lease_versions("leaseId")`;
 
+    step = 'migrate lease_versions changeType column';
+    await sql`ALTER TABLE lease_versions ADD COLUMN IF NOT EXISTS "changeType" TEXT`;
+
     // ── team_members ──────────────────────────────────────────────────────────
     step = 'create team_members table';
     await sql`

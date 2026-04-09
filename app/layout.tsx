@@ -3,6 +3,7 @@ import Script from 'next/script';
 import './globals.css';
 import { Providers } from './providers';
 import { CrispChat } from '@/components/ui/CrispChat';
+import { Analytics } from '@vercel/analytics/next';
 
 export const metadata: Metadata = {
   title: 'LeaseIQ — Never Miss a Lease Deadline Again',
@@ -40,6 +41,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
         <Providers>{children}</Providers>
         <CrispChat />
+        <Analytics />
       </body>
     </html>
   );

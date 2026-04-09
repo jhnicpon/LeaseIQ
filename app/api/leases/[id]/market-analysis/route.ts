@@ -75,6 +75,7 @@ export async function POST(_req: NextRequest, { params }: { params: Promise<{ id
     propertyType,
     monthlyRent,
     squareFootage,
+    extractedData: extracted,
   });
 
   const expiresAt = new Date();
